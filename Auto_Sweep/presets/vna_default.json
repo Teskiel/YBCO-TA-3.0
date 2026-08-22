@@ -1,0 +1,11 @@
+{
+  "name": "default",
+  "device": "vna",
+  "resource_address": "TCPIP0::localhost::hislip_PXI10_CHASSIS1_SLOT1_INDEX0::INSTR",
+  "start_freq_hz": 3000000000.0,
+  "stop_freq_hz": 6000000000.0,
+  "s_parameter": "S21",
+  "power_dbm": [-45],
+  "points": 50001,
+  "if_bandwidth_hz": 10000
+}

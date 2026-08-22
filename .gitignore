@@ -1,0 +1,35 @@
+# ===== Python 缓存 =====
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ===== 实验数据 / 大产物（不入库）=====
+Noisesweep/data/                    # 原始精扫/噪声数据（原 7.2G）
+Data_process/data_med/              # 离线处理中间产物
+Data_process/output/                # 离线处理输出
+Data_process/temporary_resonance/   # 谐振标定金标准缓存
+Auto_Sweep/experiment_data/         # 原始 .s2p 实验数据
+Auto_Sweep/draw/output/             # 绘图输出
+Auto_Sweep/plot_dashboard/pic/      # dashboard 图片
+
+# ===== 原始测量数据文件 =====
+*.s2p
+*.h5
+*.hdf5
+*.pkl
+*.npz
+
+# ===== 报告 / 压缩产物 =====
+*.docx
+*.pptx
+*.zip
+*.rar
+*.tmp
+*.tmp.*
+
+# ===== IDE / 系统 =====
+.vscode/
+.idea/
+Thumbs.db
+.claude/settings.local.json
+.claude/scheduled_tasks.json

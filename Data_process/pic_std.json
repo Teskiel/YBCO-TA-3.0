@@ -1,0 +1,269 @@
+{
+  "_description": "pic_std — Data_process 流水线画图标准。复刻 OLD compare_resonators.py 规范：Times New Roman，高 DPI，白底深色轴线。",
+
+  "defaults": {
+    "figure": {
+      "dpi": 300,
+      "save_dpi": 300,
+      "bbox_inches": "tight"
+    },
+    "font": {
+      "_comment": "字号对齐 OLD compare_resonators.py rcParams (PPT 层级: title > label > tick)",
+      "family": "Times New Roman",
+      "title": 18,
+      "axis_label": 14,
+      "tick_label": 11,
+      "legend": 12,
+      "suptitle": 20,
+      "annotation": 8,
+      "small": 7,
+      "tiny": 6
+    },
+    "lines": {
+      "data": 2.0,
+      "fit": 1.0,
+      "dash_fit": 1.0,
+      "grid": 0.5,
+      "vline": 0.8,
+      "zeroline": 0.5
+    },
+    "alpha": {
+      "data_line": 0.8,
+      "data_scatter": 0.7,
+      "fit_line": 0.5,
+      "low_conf_scatter": 0.5,
+      "grid": 0.3,
+      "grid_overview": 0.25,
+      "vline": 0.5
+    },
+    "markers": {
+      "_comment": "scatter_big=9 对齐 OLD markersize=9; scatter_small=6 对齐 OLD markersize=6",
+      "scatter_main": 40,
+      "scatter_big": 9,
+      "scatter_small": 6,
+      "highlight": 50,
+      "edge_none": "none"
+    },
+    "spines": {
+      "_comment": "轴线/刻度/背景 — 对齐 OLD compare_resonators.py: edgecolor=#222222, lw=1.2, 白底",
+      "figure_facecolor": "white",
+      "axes_facecolor": "white",
+      "edgecolor": "#222222",
+      "labelcolor": "#111111",
+      "text_color": "#111111",
+      "tick_color": "#222222",
+      "axes_linewidth": 1.2,
+      "tick_width": 1.0
+    },
+    "grid": {
+      "_comment": "网格 — OLD grid.color=#CCCCCC, alpha≈0.3",
+      "color": "#CCCCCC",
+      "alpha": 0.3,
+      "linestyle_zero": ":",
+      "linestyle_vline": "--"
+    },
+    "legend": {
+      "_comment": "图例框架 — 对齐 OLD: framealpha=0.8, facecolor=white, edgecolor=#999999",
+      "framealpha": 0.8,
+      "facecolor": "white",
+      "edgecolor": "#999999",
+      "loc": "upper right"
+    },
+    "ticks": {
+      "_comment": "MaxNLocator + prune='both' 裁剪越界刻度, 仅保留数据范围内的漂亮整数刻度. x/y 独立 nbins. y_nbins=4 适配窄范围 (10~50 MHz) 避免刻度过密",
+      "prune": "both",
+      "x_nbins": 5,
+      "x_min_ticks": 3,
+      "y_nbins": 4,
+      "y_min_ticks": 3
+    },
+    "layout": {
+      "_comment": "tight_layout rect 底部留 6% 给 caption/图外图例",
+      "rect": [0, 0.06, 1, 1],
+      "caption_fontsize": 9
+    }
+  },
+
+  "plot": {
+    "_comment": "plot 阶段各插件参数。每个插件按 _cfg(pic_std, 'plot', '<plugin_key>', ...) 读取。",
+    "save_formats": ["svg", "png"],
+    "dpi": 300,
+    "colormap": "jet",
+
+    "f0_vs_T": {
+      "_comment": "plot_f0_vs_T.py — 每共振器 f0(T) 曲线 + 汇总叠加图",
+      "figsize": [10, 7],
+      "save_formats": ["svg", "png"],
+      "dpi": 300,
+      "smoothing": {
+        "_comment": "三次样条 + MAD 离群值剔除。enabled=false 时仅画折线。",
+        "enabled": true,
+        "k": 3,
+        "outlier_mad": 5,
+        "n_points": 200
+      }
+    },
+
+    "Qi_vs_T": {
+      "_comment": "plot_Qi_vs_T.py — Qi, Qc 品质因子 vs T (semilogy)",
+      "figsize": [10, 7],
+      "save_formats": ["svg", "png"],
+      "dpi": 300,
+      "qi_power_ramp": ["#D32F2F", "#FF9800", "#2196F3", "#1565C0"],
+      "qi_target_powers": [-25, -35, -45, -55],
+      "marker": "s",
+      "legend": {
+        "title": "VNA Power (dBm)",
+        "loc": "best"
+      },
+      "smoothing": {
+        "_comment": "Qi(T) 拟合: fit_type=linear 鲁棒线性拟合 + MAD 离群剔除; fit_type=spline 三次样条平滑",
+        "enabled": true,
+        "fit_type": "linear",
+        "k": 3,
+        "outlier_mad": 5,
+        "n_points": 200
+      },
+      "log_ticks": {
+        "_comment": "semilogy y 轴主刻度 LogLocator subs. [1.0,2.0,5.0] → 2-4 labels. 调大/调密 → 加 subs; 调疏 → 减 subs",
+        "subs": [1.0, 2.0, 5.0]
+      }
+    },
+
+    "S21_waterfall": {
+      "_comment": "plot_S21_waterfall.py — |S21| 瀑布子图 (频率 x 温度)",
+      "figsize": [12, 8],
+      "linewidth": 2,
+      "colormap": "jet",
+      "save_formats": ["svg", "png"],
+      "dpi": 300,
+      "adaptive_zoom": {
+        "_comment": "温度自适应频率窗口: T≤t_low_k→span_low_mhz, T≥t_high_k→span_high_mhz, 中间线性渐变",
+        "enabled": true,
+        "t_low_k": 20,
+        "span_low_mhz": 10,
+        "t_high_k": 77,
+        "span_high_mhz": 30
+      }
+    },
+
+    "power_dependence": {
+      "_comment": "plot_power_dependence.py — VNA 功率依赖叠加图",
+      "vna_selection": {
+        "_comment": "method: all(默认,16条) | uniform(全范围均匀6条,step=6dB) | low_power(低功率-55~-35,6条,step=4dB, 间隔与uniform不同)",
+        "method": "all",
+        "n_lines": 6
+      }
+    },
+
+    "S21_laser_power": {
+      "_comment": "plot_S21_laser_power.py — |S21| vs Frequency, 激光功率作 legend, 实际温度标注",
+      "figsize": [12, 8],
+      "colormap": "plasma",
+      "save_formats": ["svg", "png"],
+      "dpi": 300,
+      "vna_powers_dbm": [-25]
+    },
+
+    "responsivity": {
+      "_comment": "plot_responsivity.py — df/f vs 激光功率 + 响应率 vs T",
+      "figsize": [10, 7],
+      "save_formats": ["svg", "png"],
+      "dpi": 300,
+      "intersection_only": {
+        "_comment": "仅使用所有温度共有的激光功率 (交集), 保证 x 轴一致",
+        "enabled": true
+      },
+      "dashed": {
+        "_comment": "额外生成带淡色虚线的版本, 存入 with_line/ 子文件夹",
+        "enabled": true,
+        "alpha": 0.4,
+        "linestyle": "--",
+        "linewidth": 1.0
+      }
+    },
+
+    "IQ_fitting": {
+      "_comment": "plot_IQ_fitting.py — IQ 平面散点图",
+      "figsize": [8, 8],
+      "scatter_size": 3,
+      "fit_linewidth": 1.5,
+      "save_formats": ["svg", "png"],
+      "dpi": 300
+    },
+
+    "verification": {
+      "_comment": "plot_verification.py — 全频谱 |S21| (上) + diff(unwrapped phase) (下) + f0 标注",
+      "figsize": [12, 9],
+      "dpi": 300,
+      "save_formats": ["svg", "png"]
+    },
+
+    "deltaf_vs_laser": {
+      "_comment": "df/f vs 激光功率 (暂无对应插件，保留)",
+      "figsize": [10, 6],
+      "markersize": 6,
+      "legend": {
+        "bbox_to_anchor": [1.02, 1],
+        "loc": "upper left",
+        "framealpha": 0.5
+      }
+    },
+
+    "summary": {
+      "_comment": "汇总图 (暂无对应插件，保留)",
+      "figsize": [6.4, 4.8],
+      "legend": {
+        "loc": "best"
+      }
+    }
+  },
+
+  "special_colors": {
+    "_comment": "特殊色 — f0_marker 用于 IQ 散点等场景",
+    "zero_line": "gray",
+    "fit_dash": "#D32F2F",
+    "f0_marker": "#D32F2F",
+    "fallback_text": "#333333"
+  },
+
+  "verification": {
+    "_comment": "逐温度验证图样式。原则：标注放空白处，不遮挡波形。",
+    "figsize": [10, 7],
+    "dpi": 300,
+    "save_formats": ["svg", "png"],
+    "resonator_colors": {
+      "_comment": "5 谐振器 f0 标记配色 — Tableau 10 (对齐 OLD compare_resonators.py)",
+      "r1": "#1F77B4",
+      "r2": "#D62728",
+      "r3": "#2CA02C",
+      "r4": "#FF7F0E",
+      "r5": "#9467BD"
+    },
+    "confirmed_f0_line": {
+      "color": "gray",
+      "linestyle": "--",
+      "linewidth": 0.6,
+      "alpha": 0.15
+    },
+    "confirmed_f0_label": {
+      "fontsize": 9,
+      "color": "gray",
+      "x_offset_fraction": 0.02,
+      "y_offset_fraction": 0.05,
+      "bbox": {
+        "boxstyle": "round,pad=0.3",
+        "facecolor": "white",
+        "edgecolor": "lightgray",
+        "alpha": 0.85
+      }
+    },
+    "phase_diff": {
+      "_comment": "diff(unwrapped phase) 子图样式 — |S21| 幅度图下方的第二面板",
+      "color": "#8E44AD",
+      "linewidth": 0.8,
+      "alpha": 0.8,
+      "ylabel": "diff(unwrapped phase) (rad/sample)"
+    }
+  }
+}

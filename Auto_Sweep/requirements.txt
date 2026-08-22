@@ -1,0 +1,17 @@
+# YBCO Auto_Sweep 依赖清单（Windows）
+
+# 注意：pyvisa 需要本机安装 NI-VISA 或 Keysight IO Libraries
+#       提供的 visa32.dll 后端，pip 本身不包含该 DLL。
+pyvisa>=1.13
+
+numpy
+scipy
+matplotlib
+scikit-rf
+PyQt5
+
+# 测试依赖
+pytest
+
+# 说明：memory_monitor.py / watchdog.py / zombie_killer.py 为 Windows-only
+# 组件（ctypes 调用 Win32 API / PowerShell），在非 Windows 系统上不可用。

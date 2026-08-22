@@ -1,0 +1,27 @@
+# ============================================================
+# YBCO-TA 3.0 统一依赖清单
+# 覆盖 Auto_Sweep + Data_process + Noisesweep 三模块
+# 安装：pip install -r requirements.txt
+# ============================================================
+
+# ---- 数值 / 科学计算 ----
+numpy
+scipy
+
+# ---- 绘图 / 微波 ----
+matplotlib
+scikit-rf            # skrf：S2P 读取与微波网络（Auto_Sweep + Data_process）
+h5py                 # HDF5 精扫/噪声数据存储（Noisesweep）
+
+# ---- 仪器驱动 ----
+pyvisa>=1.13         # VISA 后端：需本机装 NI-VISA / Keysight IO 的 visa32.dll
+nidaqmx              # NI PXIe-4480 DAQ：需本机装 NI-DAQmx 运行时驱动
+
+# ---- GUI ----
+PyQt5
+
+# ---- 核心拟合库（私有仓库 Teskiel/scarp，认证见 README「私有依赖」）----
+scraps @ git+https://github.com/Teskiel/scarp.git
+
+# ---- 测试 ----
+pytest

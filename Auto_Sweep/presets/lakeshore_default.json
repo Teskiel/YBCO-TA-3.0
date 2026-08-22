@@ -1,0 +1,15 @@
+{
+  "name": "default",
+  "device": "lakeshore",
+  "resource_address": "ASRL4::INSTR",
+  "loop1": {
+    "setpoint_k": 50.0,
+    "pid": {"p": 100.0, "i": 5.0, "d": 0.0},
+    "heater_range": 2
+  },
+  "loop2": {
+    "setpoint_k": 295.0,
+    "pid": {"p": 10.0, "i": 20.0, "d": 0.0},
+    "heater_range": 0
+  }
+}

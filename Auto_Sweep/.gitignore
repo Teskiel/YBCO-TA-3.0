@@ -1,0 +1,41 @@
+# 实验数据（大型 .s2p 文件，不纳入版本控制）
+experiment_data/
+
+# 压缩包
+*.zip
+*.rar
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 临时文件
+*.tmp.*
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+
+# 图片输出
+plot_dashboard/pic/
+
+# SDD 状态目录
+.superpowers/
+
+# 绘图输出（图片和数据）
+draw/output/
+
+# 报告产物（docx/pptx 输出与模板）
+report/*.docx
+report/*.pptx
+report/otherwise/
+report/20260718/
+
+# Claude Code 本地状态
+.claude/settings.local.json
+.claude/scheduled_tasks.json
+
+# 系统文件
+Thumbs.db
