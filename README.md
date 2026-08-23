@@ -24,6 +24,18 @@ YBCO-TA-3.0/
 
 三模块**代码层相互独立**，可单独读懂/运行；Noisesweep 通过相对路径（兄弟目录）引用 Data_process 的标定库与 Auto_Sweep 的驱动，不依赖任何绝对路径。
 
+## 芯片标定数据
+
+芯片级标定资产（chip.json、resposition 谐振记录、f(T,P) 拟合函数）存放在**独立数据仓库** [YBCO-TA-data](https://github.com/Teskiel/YBCO-TA-data)（与代码仓库分离：两者职能、修改频率、修改原因都不同）。下载并放置到本地对应路径后，本仓库的 pipeline / rescalibration.py / Noisesweep 即可直接读取——放置路径与一键部署方法见该库 README：
+
+```bash
+git clone https://github.com/Teskiel/YBCO-TA-data.git
+cd YBCO-TA-data
+python scripts/deploy_chip_library.py --data-root <本仓库或数据根路径>
+```
+
+本仓库 `Data_process/thermal_models/` 自带一份已标定芯片（YBCO#1145）的 f(T) 归档，作为开箱即用的基准；原始测量数据（.s2p 等）不入库。
+
 ## 一键安装
 
 **推荐（新电脑，全自动）**：登录 GitHub 网页下载本仓库 zip（私有仓库需登录）→ 解压 → 双击根目录 `setup.bat`。脚本自动完成：Git/Python 检测与安装、SSH 密钥生成与 443 端口配置、公钥打印（需手动添加到 GitHub）、依赖安装（scraps 直接下载 wheel）、`install.py` 自检。

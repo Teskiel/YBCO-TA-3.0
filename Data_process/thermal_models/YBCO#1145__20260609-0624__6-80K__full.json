@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "chip_id": "YBCO_unknown-batch",
+  "chip_id": "YBCO#1145",
   "run_id": "20260609-0624__6-80K__full",
   "source_data_dir": "D:\\code\\project\\YBCO_TA\\data\\20260609-0624__6-80K__full",
   "fit": {
