@@ -26,6 +26,10 @@ YBCO-TA-3.0/
 
 ## 一键安装
 
+**推荐（新电脑，全自动）**：登录 GitHub 网页下载本仓库 zip（私有仓库需登录）→ 解压 → 双击根目录 `setup.bat`。脚本自动完成：Git/Python 检测与安装、SSH 密钥生成与 443 端口配置、公钥打印（需手动添加到 GitHub）、依赖安装（scraps 直接下载 wheel）、`install.py` 自检。
+
+手动方式：
+
 ```bash
 # 1. 克隆
 git clone https://github.com/Teskiel/YBCO-TA-3.0.git
@@ -38,16 +42,9 @@ pip install -r requirements.txt
 python install.py
 ```
 
-## 私有依赖：scraps
+## scraps 依赖
 
-三模块共用的超导谐振拟合库 `scraps` 来自私有仓库 `Teskiel/scarp`。若 `pip install -r` 在拉取 scraps 时失败，是因为私有仓库需要认证，请先登录 GitHub CLI 或配置 Personal Access Token：
-
-```bash
-gh auth login                          # 推荐
-# 或
-git config --global credential.helper store
-pip install git+https://github.com/Teskiel/scarp.git
-```
+三模块共用的超导谐振拟合库 `scraps` 由公开仓库 `Teskiel/scarp` 提供，`requirements.txt` 通过 wheel 直链安装（GitHub Actions 自动构建发布，无需任何认证）。升级方式见 README 顶部版本说明。
 
 ## 硬件前置条件（真实测量才需要）
 

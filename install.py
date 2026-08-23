@@ -33,7 +33,7 @@ DEPS = [
     ("pyvisa",     "VISA 仪器驱动（Auto_Sweep + Noisesweep）"),
     ("h5py",       "HDF5 数据存储（Noisesweep）"),
     ("nidaqmx",    "NI PXIe-4480 DAQ（Noisesweep，需 NI-DAQmx 运行时）"),
-    ("scraps",     "超导谐振拟合库（三模块；私有仓库 Teskiel/scarp）"),
+    ("scraps",     "超导谐振拟合库（三模块；wheel 直链安装，Teskiel/scarp）"),
 ]
 
 # Noisesweep 相对路径（对应 noisesweep.py DEFAULTS / chip_library.py 的解析结果）
@@ -98,7 +98,7 @@ def main() -> int:
     if missing_deps:
         print("依赖缺失，请先安装：")
         print("    pip install -r requirements.txt")
-        print("（scraps 为私有仓库，若 pip 拉取失败见 README「私有依赖」节）")
+        print("（scraps 为 wheel 直链安装，若失败见 README「scraps 依赖」节）")
     if not ok:
         print("\n存在未通过项，请按上述 [X] 逐项处理。")
     else:
