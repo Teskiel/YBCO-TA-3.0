@@ -20,8 +20,8 @@ nidaqmx              # NI PXIe-4480 DAQ：需本机装 NI-DAQmx 运行时驱动
 # ---- GUI ----
 PyQt5
 
-# ---- 核心拟合库（私有仓库 Teskiel/scarp，认证见 README「私有依赖」）----
-scraps @ git+https://github.com/Teskiel/scarp.git
+# ---- 核心拟合库（scraps：GitHub Actions 自动构建发布的 wheel 直链，Teskiel/scarp）----
+scraps @ https://github.com/Teskiel/scarp/releases/download/v0.1.0/scraps-0.1.0-py3-none-any.whl
 
 # ---- 测试 ----
 pytest
