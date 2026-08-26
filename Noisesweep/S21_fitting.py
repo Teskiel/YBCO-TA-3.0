@@ -140,8 +140,45 @@ class S21NoiseCalibration:
         return cls(freq, i, q, i_norm, q_norm, x0, y0,
                    i_offset, q_offset, path, labels, values)
 
+    def _balanced_frequency(self):
+        """均衡偏置频点：圆上相对 |S21| 极小点 ±45°（≈-3dB 半功率）处。
+
+        该处幅度(径向)与相位(切向)噪声投影相当 → 两条 PSD 重叠，与 GUI 一键面板
+        在深谐振上得到的 f0+df 效果一致。对 df 退化的浅/高 T 谐振也稳健。
+        取 Q 较高的一侧（图上方向，与面板一致）；±45° 都落出采样弧时回退最大响应点。
+        """
+        i_min = int(np.argmin(np.hypot(self.i_norm, self.q_norm)))  # |S21|min ≈ 谐振底
+        rel = (self.i_norm + 1j*self.q_norm) - complex(self.x0, self.y0)
+        phi = np.angle(rel)
+        phi_min = phi[i_min]
+        cands = []
+        for sgn in (1, -1):                     # ±45°：幅度/相位响应相当
+            target = phi_min + sgn*np.pi/4
+            dphi = np.angle(np.exp(1j*(phi - target)))
+            idx = int(np.argmin(np.abs(dphi)))
+            cands.append((idx, float(self.q_norm[idx])))
+        best = min(abs(np.angle(np.exp(1j*(phi - (phi_min + np.pi/4))))).min(),
+                   abs(np.angle(np.exp(1j*(phi - (phi_min - np.pi/4))))).min())
+        if best > 1.2:                          # ±45° 都落出采样弧 → 回退最大响应点
+            d_i = np.gradient(self.i_norm); d_q = np.gradient(self.q_norm)
+            return float(self.freq[np.argmax(d_i*d_i+d_q*d_q)])
+        idx = cands[0][0] if cands[0][1] > cands[1][1] else cands[1][0]
+        return float(self.freq[idx])
+
     def measurement_frequency(self, mode, manual_frequency_hz=None):
-        """Select manual, fitted f0+df, or maximum-IQ-response frequency."""
+        """Select manual, fitted f0+df, maximum-IQ-response, or balanced frequency.
+
+        ``BALANCED`` picks the point on the fitted S21 circle at ±45° from the
+        |S21| minimum direction (≈ the -3 dB half-power bias).  There the radial
+        (amplitude) and tangential (phase) noise projections are comparable, so the
+        two PSDs overlap — matching the GUI one-key panel.
+
+        ``F0_PLUS_DF`` uses f0+df normally, but if ``df`` is degenerate (~0 —
+        shallow/overcoupled high-T resonance where the narrow scan can't resolve it),
+        f0+df collapses to the resonance bottom (direct-left on the circle, huge
+        phase drift, non-overlapping PSDs).  In that case it falls back to the
+        balanced point, so it reproduces what the GUI panel shows on a good fit.
+        """
         mode = str(mode).upper()
         if mode == "MANUAL":
             if manual_frequency_hz is None:
@@ -151,10 +188,16 @@ class S21NoiseCalibration:
             if "f0" not in self.fit_parameters or "df" not in self.fit_parameters:
                 raise ValueError("SCRAPS fit does not contain both f0 and df.")
             frequency = self.fit_parameters["f0"] + self.fit_parameters["df"]
+            idx_f = int(np.argmin(np.abs(self.freq-frequency)))
+            i_min = int(np.argmin(np.hypot(self.i_norm, self.q_norm)))
+            if abs(idx_f - i_min) <= 1:         # df 退化 → f0+df 落在 |S21| 极小 → 均衡偏置
+                frequency = self._balanced_frequency()
         elif mode == "MAX_RESPONSE":
             d_i = np.gradient(self.i_norm)
             d_q = np.gradient(self.q_norm)
             frequency = float(self.freq[np.argmax(d_i*d_i+d_q*d_q)])
+        elif mode == "BALANCED":
+            frequency = self._balanced_frequency()
         else:
             raise ValueError("Unknown noise-frequency selection: {}".format(mode))
         index = int(np.argmin(np.abs(self.freq-frequency)))

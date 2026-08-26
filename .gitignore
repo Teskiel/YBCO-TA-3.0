@@ -4,7 +4,8 @@ __pycache__/
 .pytest_cache/
 
 # ===== 实验数据 / 大产物（不入库）=====
-Noisesweep/data/                    # 原始精扫/噪声数据（原 7.2G）
+Noisesweep/data/
+# 原始精扫/噪声数据（原 7.2G）
 Data_process/data_med/              # 离线处理中间产物
 Data_process/output/                # 离线处理输出
 Data_process/temporary_resonance/   # 谐振标定金标准缓存
@@ -33,3 +34,6 @@ Auto_Sweep/plot_dashboard/pic/      # dashboard 图片
 Thumbs.db
 .claude/settings.local.json
 .claude/scheduled_tasks.json
+
+# ===== 个人 GUI 运行时状态（不入库）=====
+Noisesweep/gui_user_settings.json

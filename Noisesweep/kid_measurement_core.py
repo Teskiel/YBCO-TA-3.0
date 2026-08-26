@@ -307,19 +307,19 @@ def run_noise(ctx: MeasurementContext, p: NoiseParams, s21_file) -> NoiseResult:
                                                 calp.rotation_rad]
         dt = h5py.string_dtype("utf-8")
         h.create_dataset("channels", data=np.asarray(daq.channels, dtype=object), dtype=dt)
-        v = h.create_dataset("raw_voltage_V", shape=(len(c["channels"]), 0),
+        v = h.create_dataset("raw_voltage_V", shape=(len(c["channels"]), 0), dtype="f8",
                              maxshape=(len(c["channels"]), None),
                              chunks=(len(c["channels"]), p.block), compression=compression)
-        cv = h.create_dataset("calibrated_iq_voltage_V", shape=(2, 0), maxshape=(2, None),
-                              chunks=(2, p.block), compression=compression)
-        nv = h.create_dataset("normalized_noise_iq", shape=(2, 0), maxshape=(2, None),
-                              chunks=(2, p.block), compression=compression)
-        amp = h.create_dataset("noise_amplitude", shape=(0,), maxshape=(None,),
-                               chunks=(p.block,), compression=compression)
-        phase = h.create_dataset("noise_phase_rad", shape=(0,), maxshape=(None,),
-                                 chunks=(p.block,), compression=compression)
-        t = h.create_dataset("time_s", shape=(0,), maxshape=(None,),
-                             chunks=(p.block,), compression=compression)
+        cv = h.create_dataset("calibrated_iq_voltage_V", shape=(2, 0), dtype="f8",
+                              maxshape=(2, None), chunks=(2, p.block), compression=compression)
+        nv = h.create_dataset("normalized_noise_iq", shape=(2, 0), dtype="f8",
+                              maxshape=(2, None), chunks=(2, p.block), compression=compression)
+        amp = h.create_dataset("noise_amplitude", shape=(0,), dtype="f8",
+                               maxshape=(None,), chunks=(p.block,), compression=compression)
+        phase = h.create_dataset("noise_phase_rad", shape=(0,), dtype="f8",
+                                 maxshape=(None,), chunks=(p.block,), compression=compression)
+        t = h.create_dataset("time_s", shape=(0,), dtype="f8",
+                             maxshape=(None,), chunks=(p.block,), compression=compression)
         ctx.on_file_created("{}::{}".format(s21_path, h.name))
         total = 0
         last_phase = None

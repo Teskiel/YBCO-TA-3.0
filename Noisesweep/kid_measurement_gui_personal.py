@@ -2,8 +2,6 @@
 
 """KID measurement GUI v2: shared E8257D and PXIe-4480 connections."""
 
-import json
-import os
 import sys
 import threading
 import time
@@ -29,18 +27,33 @@ from PXIE4480_controller import PXIe4480
 from IQ_calibration import IQCalibrationTable, IQEllipseCalibrator
 from S21_fitting import ScrapsS21Fitter, S21NoiseCalibration, welch_psd
 
-import kid_measurement_core as core
+import gui_config
+import settings_persistence
+from instruments_tab import InstrumentsTab
+from auto_tab import AutoTab
 
 SCRIPT_DIRECTORY = Path(__file__).resolve().parent
-DATA_DIRECTORY = SCRIPT_DIRECTORY / "data"
+
+
+def _resolve_data_directory():
+    """数据目录指向原 KID v3 包的 data（见 gui_config.json 的 data_directory）。
+
+    新 GUI 不复制 23GB 数据，只引用原包；config 缺失时回退到本目录 data/。
+    """
+    try:
+        import json as _json
+        cfg = _json.loads((SCRIPT_DIRECTORY / "gui_config.json").read_text(encoding="utf-8"))
+        return Path(cfg.get("data_directory") or SCRIPT_DIRECTORY / "data")
+    except Exception:
+        return SCRIPT_DIRECTORY / "data"
+
+
+DATA_DIRECTORY = _resolve_data_directory()
 IQ_DATA_DIRECTORY = DATA_DIRECTORY / "IQ_calibration"
 S21_DATA_DIRECTORY = DATA_DIRECTORY / "S21"
 NOISE_DATA_DIRECTORY = DATA_DIRECTORY / "noise"
 for _directory in (IQ_DATA_DIRECTORY, S21_DATA_DIRECTORY, NOISE_DATA_DIRECTORY):
     _directory.mkdir(parents=True, exist_ok=True)
-
-# 参数持久化：用户在各 Tab 手调的值存这里，重启还原；noisesweep 也可继承。
-GUI_SETTINGS_FILE = SCRIPT_DIRECTORY / "kid_gui_settings.json"
 
 
 def latest_iq_summary():
@@ -95,194 +108,6 @@ def s21_resonance_path(path, resonance_frequency_hz, resonator_name,
     return target
 
 
-def _gui_snapshots(window):
-    """返回 {键: 取值函数} 映射，保存各 Tab 控件当前值。"""
-    s21, noise, combined, iq = window.s21, window.noise, window.combined, window.iq
-    px = window.daq_dialog
-
-    def channels():
-        return [i for i, c in enumerate(px.channels) if c.isChecked()]
-
-    return {
-        "daq.device_name": lambda: px.device.text().strip(),
-        "daq.sample_rate": lambda: px.rate.value(),
-        "daq.voltage_range": lambda: px.voltage.currentData(),
-        "daq.coupling": lambda: px.coupling.currentText(),
-        "daq.trigger_mode": lambda: "DIGITAL" if px.trigger.currentIndex() == 1 else "IMMEDIATE",
-        "daq.trigger_source": lambda: px.source.text().strip() if px.trigger.currentIndex() == 1 else None,
-        "daq.trigger_edge": lambda: px.edge.currentText(),
-        "daq.channels": channels,
-
-        "s21.center_f_ghz": lambda: s21.center_f.value(),
-        "s21.bandwidth_mhz": lambda: s21.bandwidth_mhz.value(),
-        "s21.points": lambda: s21.points.value(),
-        "s21.power_dbm": lambda: s21.power.value(),
-        "s21.settle_s": lambda: s21.settle.value(),
-        "s21.samples": lambda: s21.samples.value(),
-        "s21.i_channel": lambda: int(s21.i.currentData()),
-        "s21.q_channel": lambda: int(s21.q.currentData()),
-        "s21.fit_enabled": lambda: s21.fit_enabled.isChecked(),
-        "s21.resonator_name": lambda: s21.resonator_name.text().strip(),
-        "s21.temperature_mk": lambda: s21.temperature.value(),
-        "s21.fit_power_dbm": lambda: s21.fit_power.value(),
-        "s21.folder": lambda: s21.folder.text().strip(),
-        "s21.calibration_file": lambda: s21.calibration_file.text().strip(),
-
-        "noise.frequency_mode": lambda: str(noise.frequency_mode.currentData()),
-        "noise.frequency_ghz": lambda: noise.frequency.value(),
-        "noise.power_dbm": lambda: noise.power.value(),
-        "noise.settle_s": lambda: noise.settle.value(),
-        "noise.mode": lambda: noise.mode.currentText(),
-        "noise.duration_s": lambda: noise.duration.value(),
-        "noise.block": lambda: noise.block.value(),
-        "noise.psd_window": lambda: noise.psd_window.currentText(),
-        "noise.segment_seconds": lambda: noise.segment_seconds.value(),
-        "noise.calibration_file": lambda: noise.calibration_file.text().strip(),
-        "noise.s21_file": lambda: noise.s21_file.text().strip(),
-
-        "combined.center_ghz": lambda: combined.center.value(),
-        "combined.bandwidth_mhz": lambda: combined.bandwidth.value(),
-        "combined.points": lambda: combined.points.value(),
-        "combined.samples": lambda: combined.samples.value(),
-        "combined.power_dbm": lambda: combined.power.value(),
-        "combined.settle_s": lambda: combined.settle.value(),
-        "combined.noise_location": lambda: str(combined.noise_location.currentData()),
-        "combined.noise_duration_s": lambda: combined.noise_duration.value(),
-        "combined.noise_block": lambda: combined.noise_block.value(),
-        "combined.window_box": lambda: combined.window_box.currentText(),
-        "combined.segment": lambda: combined.segment.value(),
-        "combined.calibration_file": lambda: combined.calibration_file.text().strip(),
-        "combined.folder": lambda: combined.folder.text().strip(),
-
-        "iq.mode": lambda: iq.mode.currentIndex(),
-        "iq.frequency_ghz": lambda: iq.frequency.value(),
-        "iq.start_frequency_ghz": lambda: iq.start_frequency.value(),
-        "iq.stop_frequency_ghz": lambda: iq.stop_frequency.value(),
-        "iq.frequency_points": lambda: iq.frequency_points.value(),
-        "iq.e8257d_power_dbm": lambda: iq.e8257d_power.value(),
-        "iq.p5002a_power_dbm": lambda: iq.p5002a_power.value(),
-        "iq.sample_count": lambda: iq.sample_count.value(),
-        "iq.settling_time_s": lambda: iq.settling_time.value(),
-        "iq.i_channel": lambda: int(iq.i_channel.currentData()),
-        "iq.q_channel": lambda: int(iq.q_channel.currentData()),
-        "iq.folder": lambda: iq.folder.text().strip(),
-    }
-
-
-def save_gui_settings(window):
-    """把各 Tab 控件当前值写入 kid_gui_settings.json（原子写 .tmp + os.replace）。"""
-    settings = {}
-    for key, getter in _gui_snapshots(window).items():
-        try:
-            settings[key] = getter()
-        except Exception:
-            pass
-    try:
-        tmp = GUI_SETTINGS_FILE.with_suffix(".tmp")
-        tmp.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(str(tmp), str(GUI_SETTINGS_FILE))
-    except Exception:
-        pass
-
-
-def load_gui_settings(window):
-    """启动时用 kid_gui_settings.json 还原控件；缺失/损坏静默回落硬编码默认，绝不阻断启动。"""
-    try:
-        data = json.loads(GUI_SETTINGS_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    if not isinstance(data, dict):
-        return
-
-    s21, noise, combined, iq = window.s21, window.noise, window.combined, window.iq
-    px = window.daq_dialog
-
-    def restore(key, apply):
-        try:
-            if key in data and data[key] is not None:
-                apply(data[key])
-        except Exception:
-            pass
-
-    restore("daq.device_name", lambda v: px.device.setText(str(v)))
-    restore("daq.sample_rate", lambda v: px.rate.setValue(float(v)))
-    restore("daq.voltage_range",
-            lambda v: px.voltage.setCurrentIndex(max(0, px.voltage.findData(float(v)))))
-    restore("daq.coupling", lambda v: px.coupling.setCurrentText(str(v)))
-    restore("daq.trigger_mode",
-            lambda v: px.trigger.setCurrentIndex(1 if v == "DIGITAL" else 0))
-    restore("daq.trigger_source", lambda v: px.source.setText(str(v)))
-    restore("daq.trigger_edge", lambda v: px.edge.setCurrentText(str(v)))
-    restore("daq.channels",
-            lambda v: [c.setChecked(i in v) for i, c in enumerate(px.channels)])
-
-    restore("s21.center_f_ghz", lambda v: s21.center_f.setValue(float(v)))
-    restore("s21.bandwidth_mhz", lambda v: s21.bandwidth_mhz.setValue(float(v)))
-    restore("s21.points", lambda v: s21.points.setValue(int(v)))
-    restore("s21.power_dbm", lambda v: s21.power.setValue(float(v)))
-    restore("s21.settle_s", lambda v: s21.settle.setValue(float(v)))
-    restore("s21.samples", lambda v: s21.samples.setValue(int(v)))
-    restore("s21.i_channel",
-            lambda v: s21.i.setCurrentIndex(max(0, s21.i.findData(int(v)))))
-    restore("s21.q_channel",
-            lambda v: s21.q.setCurrentIndex(max(0, s21.q.findData(int(v)))))
-    restore("s21.fit_enabled", lambda v: s21.fit_enabled.setChecked(bool(v)))
-    restore("s21.resonator_name", lambda v: s21.resonator_name.setText(str(v)))
-    restore("s21.temperature_mk", lambda v: s21.temperature.setValue(float(v)))
-    restore("s21.fit_power_dbm", lambda v: s21.fit_power.setValue(float(v)))
-    restore("s21.folder", lambda v: s21.folder.setText(str(v)))
-    restore("s21.calibration_file", lambda v: s21.calibration_file.setText(str(v)))
-
-    restore("noise.frequency_mode",
-            lambda v: noise.frequency_mode.setCurrentIndex(max(0, noise.frequency_mode.findData(str(v)))))
-    restore("noise.frequency_ghz", lambda v: noise.frequency.setValue(float(v)))
-    restore("noise.power_dbm", lambda v: noise.power.setValue(float(v)))
-    restore("noise.settle_s", lambda v: noise.settle.setValue(float(v)))
-    restore("noise.mode",
-            lambda v: noise.mode.setCurrentIndex(max(0, noise.mode.findText(str(v)))))
-    restore("noise.duration_s", lambda v: noise.duration.setValue(float(v)))
-    restore("noise.block", lambda v: noise.block.setValue(int(v)))
-    restore("noise.psd_window", lambda v: noise.psd_window.setCurrentText(str(v)))
-    restore("noise.segment_seconds", lambda v: noise.segment_seconds.setValue(float(v)))
-    restore("noise.calibration_file", lambda v: noise.calibration_file.setText(str(v)))
-    restore("noise.s21_file", lambda v: noise.s21_file.setText(str(v)))
-
-    restore("combined.center_ghz", lambda v: combined.center.setValue(float(v)))
-    restore("combined.bandwidth_mhz", lambda v: combined.bandwidth.setValue(float(v)))
-    restore("combined.points", lambda v: combined.points.setValue(int(v)))
-    restore("combined.samples", lambda v: combined.samples.setValue(int(v)))
-    restore("combined.power_dbm", lambda v: combined.power.setValue(float(v)))
-    restore("combined.settle_s", lambda v: combined.settle.setValue(float(v)))
-    restore("combined.noise_location",
-            lambda v: combined.noise_location.setCurrentIndex(max(0, combined.noise_location.findData(str(v)))))
-    restore("combined.noise_duration_s", lambda v: combined.noise_duration.setValue(float(v)))
-    restore("combined.noise_block", lambda v: combined.noise_block.setValue(int(v)))
-    restore("combined.window_box", lambda v: combined.window_box.setCurrentText(str(v)))
-    restore("combined.segment", lambda v: combined.segment.setValue(float(v)))
-    restore("combined.calibration_file", lambda v: combined.calibration_file.setText(str(v)))
-    restore("combined.folder", lambda v: combined.folder.setText(str(v)))
-
-    restore("iq.mode", lambda v: iq.mode.setCurrentIndex(int(v)))
-    restore("iq.frequency_ghz", lambda v: iq.frequency.setValue(float(v)))
-    restore("iq.start_frequency_ghz", lambda v: iq.start_frequency.setValue(float(v)))
-    restore("iq.stop_frequency_ghz", lambda v: iq.stop_frequency.setValue(float(v)))
-    restore("iq.frequency_points", lambda v: iq.frequency_points.setValue(int(v)))
-    restore("iq.e8257d_power_dbm", lambda v: iq.e8257d_power.setValue(float(v)))
-    restore("iq.p5002a_power_dbm", lambda v: iq.p5002a_power.setValue(float(v)))
-    restore("iq.sample_count", lambda v: iq.sample_count.setValue(int(v)))
-    restore("iq.settling_time_s", lambda v: iq.settling_time.setValue(float(v)))
-    restore("iq.i_channel",
-            lambda v: iq.i_channel.setCurrentIndex(max(0, iq.i_channel.findData(int(v)))))
-    restore("iq.q_channel",
-            lambda v: iq.q_channel.setCurrentIndex(max(0, iq.q_channel.findData(int(v)))))
-    restore("iq.folder", lambda v: iq.folder.setText(str(v)))
-
-    try:
-        noise.update_selected_frequency()
-    except Exception:
-        pass
-
-
 class PersistentP5002AWindow(P5002AWindow):
     """Keep the shared VNA session alive when the control window is closed."""
 
@@ -311,10 +136,18 @@ class InstrumentManager:
         self.daq_lock = threading.RLock()
         self.daq_config = {
             "device_name": "PXI2Slot2", "channels": [0, 1],
-            "sample_rate": 1_000_000.0, "voltage_range": 10.0,
+            "sample_rate": 100_000.0, "voltage_range": 10.0,
             "coupling": "DC", "trigger_mode": "IMMEDIATE",
             "trigger_source": None, "trigger_edge": "RISING",
         }
+        # ---- 新增：LakeShore / 激光（可选硬件，由 backends 工厂创建）----
+        self.config = {}
+        self.temp = None
+        self.temp_status = {}
+        self.temp_lock = threading.RLock()
+        self.laser = None
+        self.laser_status = {}
+        self.laser_lock = threading.RLock()
 
     @property
     def source_connected(self):
@@ -333,6 +166,58 @@ class InstrumentManager:
         if not self.p5002_connected:
             raise RuntimeError("P5002A尚未在仪器控制窗口中连接。")
         return self.p5002_window.vna
+
+    @property
+    def temp_connected(self):
+        return self.temp is not None and not getattr(self.temp, "is_fixed", False)
+
+    @property
+    def laser_connected(self):
+        return self.laser is not None and not getattr(self.laser, "is_null", False)
+
+    def connect_temp(self, config=None):
+        """用 backends 工厂连接 LakeShore（地址为空 → FixedTemperature 回退）。"""
+        from backends import make_temperature_backend
+        cfg = config or self.config
+        with self.temp_lock:
+            self.disconnect_temp()
+            self.temp = make_temperature_backend(cfg.get("backend", "autosweep"), cfg)
+            self.temp_status = {"identity": getattr(self.temp, "identity", "")}
+            return self.temp
+
+    def disconnect_temp(self):
+        with self.temp_lock:
+            if self.temp is not None:
+                try:
+                    self.temp.close()
+                except Exception:
+                    pass
+            self.temp = None
+            self.temp_status = {}
+
+    def connect_laser(self, config=None):
+        """用 backends 工厂连接激光（地址为空 → NullLaser 回退）。"""
+        from backends import make_laser_backend
+        cfg = config or self.config
+        with self.laser_lock:
+            self.disconnect_laser()
+            self.laser = make_laser_backend(cfg.get("backend", "autosweep"), cfg)
+            if self.laser_connected:
+                try:
+                    self.laser_status = dict(self.laser.get_status())
+                except Exception:
+                    self.laser_status = {}
+            return self.laser
+
+    def disconnect_laser(self):
+        with self.laser_lock:
+            if self.laser is not None:
+                try:
+                    self.laser.close()
+                except Exception:
+                    pass
+            self.laser = None
+            self.laser_status = {}
 
     def connect_source(self, address):
         with self.source_lock:
@@ -371,6 +256,8 @@ class InstrumentManager:
                 pass
         self.daq_connected = False
         self.daq_identity = ""
+        self.disconnect_temp()
+        self.disconnect_laser()
 
 
 class E8257DDialog(QDialog):
@@ -482,7 +369,7 @@ class PXIeDialog(QDialog):
 
     def __init__(self, manager, parent=None):
         super().__init__(parent);self.manager=manager;self.preview_worker=None;self.preview_time=None;self.preview_data=None;self.preview_channels=None;self.setWindowTitle("PXIe-4480共享控制与配置");self.resize(900,700);layout=QVBoxLayout(self);box=QGroupBox("连接与公共采集配置");grid=QGridLayout(box)
-        self.device=QLineEdit("PXI2Slot2");self.rate=QDoubleSpinBox();self.rate.setRange(100,20_000_000);self.rate.setDecimals(3);self.rate.setValue(1_000_000);self.rate.setSuffix(" S/s")
+        self.device=QLineEdit("PXI2Slot2");self.rate=QDoubleSpinBox();self.rate.setRange(100,20_000_000);self.rate.setDecimals(3);self.rate.setValue(100_000);self.rate.setSuffix(" S/s")
         self.voltage=QComboBox();[self.voltage.addItem("±{} V".format(v),v) for v in (.5,1.,5.,10.)];self.voltage.setCurrentIndex(3);self.coupling=QComboBox();self.coupling.addItems(("DC","AC"));self.trigger=QComboBox();self.trigger.addItems(("立即启动","PFI0外部触发"));self.source=QLineEdit("/PXI2Slot2/PFI0");self.edge=QComboBox();self.edge.addItems(("RISING","FALLING"));self.status=QLabel("● 未连接")
         grid.addWidget(QLabel("设备"),0,0);grid.addWidget(self.device,0,1);grid.addWidget(QLabel("采样率"),0,2);grid.addWidget(self.rate,0,3);grid.addWidget(QLabel("量程"),1,0);grid.addWidget(self.voltage,1,1);grid.addWidget(QLabel("耦合"),1,2);grid.addWidget(self.coupling,1,3);grid.addWidget(QLabel("触发"),2,0);grid.addWidget(self.trigger,2,1);grid.addWidget(self.source,2,2);grid.addWidget(self.edge,2,3)
         row=QHBoxLayout();row.addWidget(QLabel("采集通道"));self.channels=[]
@@ -540,7 +427,7 @@ class PXIeDialog(QDialog):
 
 class MeasurementWorker(QThread):
     s21_point=pyqtSignal(object,object,object,int,int);s21_fit_ready=pyqtSignal(object);s21_fit_failed=pyqtSignal(str);noise_block=pyqtSignal(object,object,object,float);file_created=pyqtSignal(str);done=pyqtSignal(str);error=pyqtSignal(str)
-    def __init__(self,manager,kind,parameters,path,parent=None):super().__init__(parent);self.manager=manager;self.kind=kind;self.p=parameters;self.path=path;self.stop_requested=False;self.daq=None
+    def __init__(self,manager,kind,parameters,path,parent=None,rename_target=True):super().__init__(parent);self.manager=manager;self.kind=kind;self.p=parameters;self.path=path;self.stop_requested=False;self.daq=None;self.rename_target=bool(rename_target)
     def stop(self):
         self.stop_requested=True
         if self.daq:self.daq.stop_continuous()
@@ -552,65 +439,50 @@ class MeasurementWorker(QThread):
             else:self.run_noise()
             self.done.emit(str(self.path))
         except Exception as e:self.error.emit("{}: {}".format(type(e).__name__,e))
-    def _make_daq(self):
-        self.daq = self.manager.make_daq()
-        return self.daq
-
-    def _record_source_status(self, frequency_hz, power_dbm):
-        self.manager.source_status = {
-            "frequency_ghz": float(frequency_hz)/1e9,
-            "power_dbm": float(power_dbm), "rf_on": True,
-        }
-
-    def _make_context(self):
-        return core.MeasurementContext(
-            source=self.manager.source, source_lock=self.manager.source_lock,
-            daq_config=self.manager.daq_config, daq_lock=self.manager.daq_lock,
-            make_daq=self._make_daq,
-            on_file_created=self.file_created.emit,
-            on_s21_point=self.s21_point.emit,
-            on_s21_fit_ready=self.s21_fit_ready.emit,
-            on_s21_fit_failed=self.s21_fit_failed.emit,
-            on_noise_block=self.noise_block.emit,
-            on_source_configured=self._record_source_status,
-            should_stop=lambda: self.stop_requested,
-        )
-
+    def configure_source(self,frequency_hz,power_dbm):
+        with self.manager.source_lock:
+            self.manager.source.set_frequency_hz(frequency_hz);self.manager.source.set_power_dbm(power_dbm);self.manager.source.rf_on();self.manager.source.wait_until_complete();self.manager.source_status={"frequency_ghz":float(frequency_hz)/1e9,"power_dbm":float(power_dbm),"rf_on":True}
+    def acquire(self,**kwargs):
+        c=self.manager.daq_config
+        with self.manager.daq_lock:return self.daq.acquire(trigger_mode=c["trigger_mode"],trigger_source=c["trigger_source"],trigger_edge=c["trigger_edge"],timeout=120,**kwargs)
+    def metadata(self,h):
+        c=self.manager.daq_config;h.attrs["created_at"]=datetime.now().isoformat(timespec="seconds");h.attrs["e8257d_visa_address"]=self.manager.source.resource_name;h.attrs["pxie_device_name"]=c["device_name"];h.attrs["requested_sample_rate_hz"]=c["sample_rate"];h.attrs["voltage_range_V"]=c["voltage_range"];h.attrs["coupling"]=c["coupling"];h.attrs["trigger_mode"]=c["trigger_mode"]
     def run_s21(self):
-        # 薄壳：算法在 kid_measurement_core.run_s21；这里只翻译参数 + 保留 GUI 的文件重命名习惯。
-        result = core.run_s21(self._make_context(), core.S21Params(
-            start_hz=self.p["start"], stop_hz=self.p["stop"],
-            center_hz=self.p["center"], bandwidth_hz=self.p["bandwidth"],
-            points=self.p["points"], samples=self.p["samples"],
-            power_dbm=self.p["power"], settle_s=self.p["settle"],
-            i_channel=int(self.p["i"]), q_channel=int(self.p["q"]),
-            calibration_file=self.p["calibration_file"],
-            fit_enabled=self.p["fit_enabled"],
-            resonator_name=self.p["resonator_name"],
-            temperature_k=self.p["temperature_k"],
-            readout_power_dbm=self.p["readout_power_dbm"],
-        ), self.path)
-        if result.resonance_frequency_hz is not None:
-            target = s21_resonance_path(
-                self.path, result.resonance_frequency_hz,
-                self.p["resonator_name"], self.p["temperature_k"],
-                self.p["readout_power_dbm"],
-            )
-            if target != self.path:
-                self.path.replace(target)
-                self.path = target
-
+        c=self.manager.daq_config;self.daq=self.manager.make_daq();calibration_table=IQCalibrationTable.load(self.p["calibration_file"]);freq=np.linspace(self.p["start"],self.p["stop"],self.p["points"]);selected=c["channels"];ip=selected.index(self.p["i"]);qp=selected.index(self.p["q"]);resonance_frequency=None
+        with h5py.File(self.path,"w") as h:
+            self.metadata(h);h.attrs["measurement"]="KID S21";h.attrs["resonator_name"]=self.p["resonator_name"];h.attrs["temperature_mK"]=self.p["temperature_k"]*1000;h.attrs["readout_power_dbm"]=self.p["readout_power_dbm"];h.attrs["center_frequency_hz"]=self.p.get("center",(self.p["start"]+self.p["stop"])/2);h.attrs["bandwidth_hz"]=self.p.get("bandwidth",self.p["stop"]-self.p["start"]);h.attrs["power_dbm"]=self.p["power"];h.attrs["iq_calibration_file"]=calibration_table.source_path
+            for _k, _v in (self.p.get("extra_attrs") or {}).items():h.attrs[_k]=_v
+            h.create_dataset("frequency_hz",data=freq);dt=h5py.string_dtype("utf-8");h.create_dataset("channels",data=np.asarray(self.daq.channels,dtype=object),dtype=dt);raw=h.create_dataset("raw_voltage_V",shape=(len(freq),len(selected),self.p["samples"]),dtype="f8",chunks=(1,len(selected),self.p["samples"]),compression="gzip");mean=h.create_dataset("mean_voltage_V",shape=(len(freq),len(selected)),dtype="f8");cal=h.create_dataset("calibrated_iq_voltage_V",shape=(len(freq),2,self.p["samples"]),dtype="f8",chunks=(1,2,self.p["samples"]),compression="gzip");calmean=h.create_dataset("calibrated_mean_iq_V",shape=(len(freq),2),dtype="f8");calparams=h.create_dataset("iq_calibration_parameters",shape=(len(freq),5),dtype="f8");calparams.attrs["columns"]="I0_V,Q0_V,A_I_V,A_Q_V,rotation_q_rad";mag=h.create_dataset("s21_magnitude_db",shape=(len(freq),),dtype="f8");phase=h.create_dataset("s21_phase_deg",shape=(len(freq),),dtype="f8");h.attrs["completed_points"]=0;self.file_created.emit(str(self.path))
+            for n,f in enumerate(freq):
+                if self.stop_requested:break
+                self.configure_source(f,self.p["power"]);time.sleep(self.p["settle"]);r=self.acquire(sample_count=self.p["samples"]);m=np.mean(r.data,axis=1);ic,qc,p=calibration_table.transform(f,r.data[ip],r.data[qp]);cm=np.array([np.mean(ic),np.mean(qc)]);s=complex(cm[0],cm[1]);raw[n]=r.data;mean[n]=m;cal[n]=np.vstack((ic,qc));calmean[n]=cm;calparams[n]=[p.i_offset,p.q_offset,p.i_axis,p.q_axis,p.rotation_rad];mag[n]=20*np.log10(max(abs(s),np.finfo(float).tiny));phase[n]=np.degrees(np.angle(s));h.attrs["actual_sample_rate_hz"]=r.actual_sample_rate;h.attrs["completed_points"]=n+1;h.flush();self.s21_point.emit(freq[:n+1].copy(),mag[:n+1],phase[:n+1],n+1,len(freq))
+            completed=int(h.attrs["completed_points"])
+            if self.p["fit_enabled"] and not self.stop_requested and completed==len(freq):
+                try:
+                    fitter=ScrapsS21Fitter(self.p["resonator_name"],self.p["temperature_k"],self.p["readout_power_dbm"]);fit=fitter.fit(freq,calmean[:,0],calmean[:,1]);group=h.create_group("scraps_fit");group.attrs["Qi"]=fit.Qi;group.attrs["Qc"]=fit.Qc;group.attrs["report"]=fit.report
+                    group.create_dataset("labels",data=np.asarray(fit.labels,dtype=object),dtype=h5py.string_dtype("utf-8"));group.create_dataset("values",data=fit.values);group.create_dataset("I",data=fit.I);group.create_dataset("Q",data=fit.Q);group.create_dataset("resultI",data=fit.resultI);group.create_dataset("resultQ",data=fit.resultQ);group.create_dataset("INorm",data=fit.INorm);group.create_dataset("QNorm",data=fit.QNorm);group.create_dataset("resultINorm",data=fit.resultINorm);group.create_dataset("resultQNorm",data=fit.resultQNorm)
+                    group.attrs["x0"]=float(fit.res.x0);group.attrs["y0"]=float(fit.res.y0);group.attrs["Ioffset"]=float(getattr(fit.res,"Ioffset",0.0));group.attrs["Qoffset"]=float(getattr(fit.res,"Qoffset",0.0));fit_parameters=dict(zip(fit.labels,fit.values));resonance_frequency=float(fit_parameters["f0"]+fit_parameters["df"]);h.attrs["resonance_frequency_hz"]=resonance_frequency;h.flush();self.s21_fit_ready.emit(fit)
+                except Exception as fit_error:
+                    h.attrs["scraps_fit_error"]="{}: {}".format(type(fit_error).__name__,fit_error);h.flush();self.s21_fit_failed.emit(h.attrs["scraps_fit_error"])
+            h.attrs["stopped_by_user"]=self.stop_requested
+        if self.rename_target and resonance_frequency is not None:
+            target=s21_resonance_path(self.path,resonance_frequency,self.p["resonator_name"],self.p["temperature_k"],self.p["readout_power_dbm"])
+            if target!=self.path:self.path.replace(target);self.path=target
     def run_noise(self):
-        core.run_noise(self._make_context(), core.NoiseParams(
-            s21_file=self.p["s21_file"], frequency_mode=self.p["frequency_mode"],
-            manual_frequency_hz=self.p["manual_frequency"],
-            power_dbm=self.p["power"], settle_s=self.p["settle"],
-            continuous=self.p["continuous"], duration_s=self.p["duration"],
-            block=self.p["block"], i_channel=int(self.p["i"]),
-            q_channel=int(self.p["q"]), calibration_file=self.p["calibration_file"],
-            window=self.p["window"], segment_seconds=self.p["segment_seconds"],
-        ), self.path)
-
+        c=self.manager.daq_config;self.daq=self.manager.make_daq();calibration_table=IQCalibrationTable.load(self.p["calibration_file"]);noise_calibration=S21NoiseCalibration.load(self.p["s21_file"]);frequency,s21_index=noise_calibration.measurement_frequency(self.p["frequency_mode"],self.p["manual_frequency"]);selected=c["channels"];ip=selected.index(self.p["i"]);qp=selected.index(self.p["q"]);self.configure_source(frequency,self.p["power"]);time.sleep(self.p["settle"]);target=None if self.p["continuous"] else round(self.p["duration"]*c["sample_rate"])
+        with h5py.File(self.p["s21_file"],"a") as s21_file:
+            compression=None if c["sample_rate"]>=500_000 else "gzip";root=s21_file.require_group("noise_measurements");group_name=datetime.now().strftime("%Y%m%d-%H%M%S-%f");h=root.create_group(group_name);self.metadata(h);h.attrs["measurement"]="KID noise";h.attrs["frequency_hz"]=frequency;h.attrs["frequency_selection_mode"]=self.p["frequency_mode"];h.attrs["manual_frequency_hz"]=self.p["manual_frequency"];h.attrs["power_dbm"]=self.p["power"];h.attrs["iq_calibration_file"]=calibration_table.source_path;h.attrs["s21_fit_file"]=noise_calibration.source_path;h.attrs["psd_method"]="welch";h.attrs["welch_window"]=self.p["window"];h.attrs["welch_segment_seconds"]=self.p["segment_seconds"];h.attrs["samples_per_read"]=self.p["block"];h.attrs["daq_buffer_seconds"]=10.0;h.attrs["storage_compression"]="none" if compression is None else compression;p=calibration_table.parameters_at(frequency);h.attrs["iq_calibration_parameters"]=[p.i_offset,p.q_offset,p.i_axis,p.q_axis,p.rotation_rad];dt=h5py.string_dtype("utf-8");h.create_dataset("channels",data=np.asarray(self.daq.channels,dtype=object),dtype=dt);v=h.create_dataset("raw_voltage_V",shape=(len(c["channels"]),0),maxshape=(len(c["channels"]),None),chunks=(len(c["channels"]),self.p["block"]),compression=compression);cv=h.create_dataset("calibrated_iq_voltage_V",shape=(2,0),maxshape=(2,None),chunks=(2,self.p["block"]),compression=compression);nv=h.create_dataset("normalized_noise_iq",shape=(2,0),maxshape=(2,None),chunks=(2,self.p["block"]),compression=compression);amp=h.create_dataset("noise_amplitude",shape=(0,),maxshape=(None,),chunks=(self.p["block"],),compression=compression);phase=h.create_dataset("noise_phase_rad",shape=(0,),maxshape=(None,),chunks=(self.p["block"],),compression=compression);t=h.create_dataset("time_s",shape=(0,),maxshape=(None,),chunks=(self.p["block"],),compression=compression);self.file_created.emit("{}::{}".format(self.p["s21_file"],h.name));total=0;last_phase=None;last_flush=0
+            with self.manager.daq_lock:
+                for b in self.daq.acquire_continuous(samples_per_read=self.p["block"],buffer_seconds=10.0,trigger_mode=c["trigger_mode"],trigger_source=c["trigger_source"],trigger_edge=c["trigger_edge"],read_timeout=120):
+                    keep=b.sample_count if target is None else min(b.sample_count,target-total)
+                    if keep<=0:break
+                    ic,qc,_=calibration_table.transform(frequency,b.data[ip,:keep],b.data[qp,:keep]);calblock=np.vstack((ic,qc));noise_amp,noise_phase,noise_i,noise_q,s21_index=noise_calibration.transform(frequency,ic,qc);noise_phase=np.unwrap(noise_phase);noise_phase+=0.0 if last_phase is None else 2*np.pi*np.round((last_phase-noise_phase[0])/(2*np.pi));last_phase=float(noise_phase[-1]);new=total+keep;block_time=np.arange(total,new,dtype=float)/b.actual_sample_rate;v.resize((len(c["channels"]),new));v[:,total:new]=b.data[:,:keep];cv.resize((2,new));cv[:,total:new]=calblock;nv.resize((2,new));nv[:,total:new]=np.vstack((noise_i,noise_q));amp.resize((new,));amp[total:new]=noise_amp;phase.resize((new,));phase[total:new]=noise_phase;t.resize((new,));t[total:new]=block_time;total=new;h.attrs["actual_sample_rate_hz"]=b.actual_sample_rate;h.attrs["sample_count_per_channel"]=total;h.attrs["s21_reference_index"]=s21_index;h.attrs["s21_reference_frequency_hz"]=noise_calibration.freq[s21_index];h.attrs["s21_circle_center"]=[noise_calibration.x0,noise_calibration.y0]
+                    if total-last_flush>=2*b.actual_sample_rate:s21_file.flush();last_flush=total
+                    payload={"amplitude":noise_amp,"phase":noise_phase,"i_norm":noise_i,"q_norm":noise_q,"s21_i_norm":noise_calibration.i_norm,"s21_q_norm":noise_calibration.q_norm,"test_point":(noise_calibration.i_norm[s21_index],noise_calibration.q_norm[s21_index])};self.noise_block.emit(block_time,payload,("Amplitude","Phase"),b.actual_sample_rate)
+                    if self.stop_requested or (target is not None and total>=target):self.daq.stop_continuous();break
+            if total>=16:
+                frequency_psd,amplitude_psd,nperseg=welch_psd(amp[:],h.attrs["actual_sample_rate_hz"],self.p["segment_seconds"],self.p["window"]);_,phase_psd,_=welch_psd(phase[:],h.attrs["actual_sample_rate_hz"],self.p["segment_seconds"],self.p["window"],unwrap=True);h.create_dataset("noise_spectrum_frequency_hz",data=frequency_psd);h.create_dataset("amplitude_psd_per_hz",data=amplitude_psd);h.create_dataset("phase_psd_rad2_per_hz",data=phase_psd);h.attrs["welch_nperseg"]=nperseg
+            h.attrs["stopped_by_user"]=self.stop_requested;s21_file.flush()
     def finish_rf(self):
         pass
 
@@ -649,7 +521,7 @@ class S21Tab(BaseMeasurementTab):
     def __init__(self,window):
         super().__init__(window);layout=QVBoxLayout(self);layout.addWidget(self.status);box=QGroupBox("S21测量参数");g=QGridLayout(box)
         self.center_f=QDoubleSpinBox();self.center_f.setRange(.000001,1000);self.center_f.setDecimals(9);self.center_f.setValue(5);self.center_f.setSuffix(" GHz");self.bandwidth_mhz=QDoubleSpinBox();self.bandwidth_mhz.setRange(.000001,1_000_000);self.bandwidth_mhz.setDecimals(6);self.bandwidth_mhz.setValue(2000);self.bandwidth_mhz.setSuffix(" MHz")
-        self.points=QSpinBox();self.points.setRange(2,1_000_000);self.points.setValue(101);self.power=QDoubleSpinBox();self.power.setRange(-150,30);self.power.setValue(-30);self.power.setSuffix(" dBm");self.settle=QDoubleSpinBox();self.settle.setRange(0,60);self.settle.setDecimals(3);self.settle.setValue(.010);self.settle.setSuffix(" s");self.samples=QSpinBox();self.samples.setRange(1,10_000_000);self.samples.setValue(1000);self.i=QComboBox();self.q=QComboBox();[self.i.addItem("ai{}".format(x),x) for x in range(6)];[self.q.addItem("ai{}".format(x),x) for x in range(6)];self.q.setCurrentIndex(1);self.fit_enabled=QCheckBox("扫描完成后进行SCRAPS拟合");self.resonator_name=QLineEdit("res0");self.temperature=QDoubleSpinBox();self.temperature.setRange(.001,1_000_000);self.temperature.setDecimals(3);self.temperature.setValue(100);self.temperature.setSuffix(" mK");self.fit_power=QDoubleSpinBox();self.fit_power.setRange(-150,30);self.fit_power.setValue(-60);self.fit_power.setSuffix(" dBm");self.folder=QLineEdit(str(S21_DATA_DIRECTORY));choose=QPushButton("选择目录");choose.clicked.connect(lambda:self.choose(self.folder));self.calibration_file=QLineEdit(latest_iq_summary());choose_cal=QPushButton("选择校准文件");choose_cal.clicked.connect(lambda:self.choose_calibration(self.calibration_file))
+        self.points=QSpinBox();self.points.setRange(2,1_000_000);self.points.setValue(201);self.power=QDoubleSpinBox();self.power.setRange(-150,30);self.power.setValue(-30);self.power.setSuffix(" dBm");self.settle=QDoubleSpinBox();self.settle.setRange(0,60);self.settle.setDecimals(3);self.settle.setValue(.05);self.settle.setSuffix(" s");self.samples=QSpinBox();self.samples.setRange(1,10_000_000);self.samples.setValue(1000);self.i=QComboBox();self.q=QComboBox();[self.i.addItem("ai{}".format(x),x) for x in range(6)];[self.q.addItem("ai{}".format(x),x) for x in range(6)];self.q.setCurrentIndex(1);self.fit_enabled=QCheckBox("扫描完成后进行SCRAPS拟合");self.resonator_name=QLineEdit("res0");self.temperature=QDoubleSpinBox();self.temperature.setRange(.001,1_000_000);self.temperature.setDecimals(3);self.temperature.setValue(100);self.temperature.setSuffix(" mK");self.fit_power=QDoubleSpinBox();self.fit_power.setRange(-150,30);self.fit_power.setValue(-60);self.fit_power.setSuffix(" dBm");self.folder=QLineEdit(str(S21_DATA_DIRECTORY));choose=QPushButton("选择目录");choose.clicked.connect(lambda:self.choose(self.folder));self.calibration_file=QLineEdit(latest_iq_summary());choose_cal=QPushButton("选择校准文件");choose_cal.clicked.connect(lambda:self.choose_calibration(self.calibration_file))
         fields=[("中心频率",self.center_f),("扫描带宽",self.bandwidth_mhz),("频点数",self.points),("功率",self.power),("稳定时间",self.settle),("每频点采样数",self.samples),("I通道",self.i),("Q通道",self.q)]
         for n,(label,w) in enumerate(fields):r=n//4;c=(n%4)*2;g.addWidget(QLabel(label),r,c);g.addWidget(w,r,c+1)
         g.addWidget(self.fit_enabled,2,0,1,2);g.addWidget(QLabel("谐振器名称"),2,2);g.addWidget(self.resonator_name,2,3);g.addWidget(QLabel("温度"),2,4);g.addWidget(self.temperature,2,5);g.addWidget(QLabel("读出功率"),2,6);g.addWidget(self.fit_power,2,7);g.addWidget(QLabel("存储目录"),3,0);g.addWidget(self.folder,3,1,1,5);g.addWidget(choose,3,6);g.addWidget(QLabel("IQ校准文件"),4,0);g.addWidget(self.calibration_file,4,1,1,5);g.addWidget(choose_cal,4,6);layout.addWidget(box);row=QHBoxLayout();self.start=QPushButton("开始S21扫描");self.stop_button=QPushButton("停止");self.stop_button.setEnabled(False);self.progress=QProgressBar();self.file=QLabel("尚未生成文件");self.start.clicked.connect(self.begin);self.stop_button.clicked.connect(self.stop);row.addWidget(self.start);row.addWidget(self.stop_button);row.addWidget(self.progress);row.addWidget(self.file,1);layout.addLayout(row);self.canvas=FigureCanvas(Figure(tight_layout=True));self.fit_axes=self.canvas.figure.subplots(2,2);self.axes=(self.fit_axes[0,0],self.fit_axes[1,0]);self.fit_axes[0,1].set_visible(False);self.fit_axes[1,1].set_visible(False);layout.addWidget(NavigationToolbar(self.canvas,self));layout.addWidget(self.canvas,1);self.fit_text=QPlainTextEdit();self.fit_text.setReadOnly(True);self.fit_text.setMaximumHeight(145);self.fit_text.setPlaceholderText("SCRAPS拟合结果将在这里显示。");layout.addWidget(self.fit_text)
@@ -661,7 +533,7 @@ class S21Tab(BaseMeasurementTab):
             if i==q or i not in c["channels"] or q not in c["channels"]:raise ValueError("I/Q必须不同，并且已在PXIe公共配置中选中。")
             half_bandwidth_hz=self.bandwidth_mhz.value()*1e6/2;center_hz=self.center_f.value()*1e9;start_hz=center_hz-half_bandwidth_hz;stop_hz=center_hz+half_bandwidth_hz
             if start_hz<=0:raise ValueError("中心频率减去一半带宽后必须大于0 Hz。")
-            calibration_file=self.calibration_file.text().strip();IQCalibrationTable.load(calibration_file);p={"start":start_hz,"stop":stop_hz,"center":center_hz,"bandwidth":self.bandwidth_mhz.value()*1e6,"points":self.points.value(),"power":self.power.value(),"settle":self.settle.value(),"samples":self.samples.value(),"i":i,"q":q,"calibration_file":calibration_file,"fit_enabled":self.fit_enabled.isChecked(),"resonator_name":self.resonator_name.text().strip() or "res0","temperature_k":self.temperature.value()/1000,"readout_power_dbm":self.fit_power.value()};path=output_path(self.folder.text(),"S21","{}GHz-{}MHz".format(self.center_f.value(),self.bandwidth_mhz.value()));self.fit_text.clear();self.worker=MeasurementWorker(self.manager,"s21",p,path,self);self.worker.s21_point.connect(self.plot);self.worker.s21_fit_ready.connect(self.show_fit);self.worker.s21_fit_failed.connect(self.fit_failed);self.worker.file_created.connect(self.file.setText);self.worker.done.connect(self.finished);self.worker.error.connect(self.failure);self.progress.setRange(0,p["points"]);self.set_running(True);self.worker.start();save_gui_settings(self.window)
+            calibration_file=self.calibration_file.text().strip();IQCalibrationTable.load(calibration_file);p={"start":start_hz,"stop":stop_hz,"center":center_hz,"bandwidth":self.bandwidth_mhz.value()*1e6,"points":self.points.value(),"power":self.power.value(),"settle":self.settle.value(),"samples":self.samples.value(),"i":i,"q":q,"calibration_file":calibration_file,"fit_enabled":self.fit_enabled.isChecked(),"resonator_name":self.resonator_name.text().strip() or "res0","temperature_k":self.temperature.value()/1000,"readout_power_dbm":self.fit_power.value()};path=output_path(self.folder.text(),"S21","{}GHz-{}MHz".format(self.center_f.value(),self.bandwidth_mhz.value()));self.fit_text.clear();self.worker=MeasurementWorker(self.manager,"s21",p,path,self);self.worker.s21_point.connect(self.plot);self.worker.s21_fit_ready.connect(self.show_fit);self.worker.s21_fit_failed.connect(self.fit_failed);self.worker.file_created.connect(self.file.setText);self.worker.done.connect(self.finished);self.worker.error.connect(self.failure);self.progress.setRange(0,p["points"]);self.set_running(True);self.worker.start()
         except Exception as e:QMessageBox.critical(self,"无法开始",str(e))
     def plot(self,f,m,p,n,total):
         x=np.asarray(f)/1e9;self.axes[0].clear();self.axes[0].plot(x,m);self.axes[0].set_ylabel("Magnitude (dB)");self.axes[0].grid(True,alpha=.3);self.axes[1].clear();self.axes[1].plot(x,p);self.axes[1].set_ylabel("Phase (deg)");self.axes[1].set_xlabel("Frequency (GHz)");self.axes[1].grid(True,alpha=.3);self.canvas.draw_idle();self.progress.setValue(n)
@@ -686,7 +558,7 @@ class S21Tab(BaseMeasurementTab):
 
 class NoiseTab(BaseMeasurementTab):
     def __init__(self,window):
-        super().__init__(window);self.rt=None;self.rd=None;self.rni=None;self.rnq=None;self.s21_i_norm=None;self.s21_q_norm=None;self.test_point=None;layout=QVBoxLayout(self);layout.addWidget(self.status);box=QGroupBox("噪声测量参数");g=QGridLayout(box);self.frequency=QDoubleSpinBox();self.frequency.setRange(.000001,1000);self.frequency.setDecimals(9);self.frequency.setValue(5);self.frequency.setSuffix(" GHz");self.frequency_mode=QComboBox();self.frequency_mode.addItem("手动频率","MANUAL");self.frequency_mode.addItem("拟合频率 f0+df","F0_PLUS_DF");self.frequency_mode.addItem("最大响应点 dI²+dQ²","MAX_RESPONSE");self.frequency_mode.setCurrentIndex(1);self.frequency_mode.currentIndexChanged.connect(self.update_selected_frequency);self.power=QDoubleSpinBox();self.power.setRange(-150,30);self.power.setValue(-30);self.power.setSuffix(" dBm");self.settle=QDoubleSpinBox();self.settle.setRange(0,60);self.settle.setValue(.1);self.settle.setSuffix(" s");self.mode=QComboBox();self.mode.addItems(("指定时长","无限连续"));self.duration=QDoubleSpinBox();self.duration.setRange(.001,86400);self.duration.setValue(10);self.duration.setSuffix(" s");self.mode.currentIndexChanged.connect(lambda:self.duration.setEnabled(self.mode.currentIndex()==0));self.block=QSpinBox();self.block.setRange(100,10_000_000);self.block.setValue(10_000);self.i=QComboBox();self.q=QComboBox();[self.i.addItem("ai{}".format(x),x) for x in range(6)];[self.q.addItem("ai{}".format(x),x) for x in range(6)];self.q.setCurrentIndex(1);self.psd_window=QComboBox();self.psd_window.addItems(("hann","hamming","blackman","boxcar"));self.psd_window.setCurrentText("hamming");self.segment_seconds=QDoubleSpinBox();self.segment_seconds.setRange(.000001,86400);self.segment_seconds.setDecimals(6);self.segment_seconds.setValue(1.0);self.segment_seconds.setSuffix(" s");self.iq_plot_points=QSpinBox();self.iq_plot_points.setRange(10,10_000_000);self.iq_plot_points.setValue(10_000);self.folder=QLineEdit(str(NOISE_DATA_DIRECTORY));choose=QPushButton("选择目录");choose.clicked.connect(lambda:self.choose(self.folder));self.calibration_file=QLineEdit(latest_iq_summary());choose_cal=QPushButton("选择校准文件");choose_cal.clicked.connect(lambda:self.choose_calibration(self.calibration_file));self.s21_file=QLineEdit(latest_fitted_s21());self.s21_file.editingFinished.connect(self.update_selected_frequency);choose_s21=QPushButton("选择S21文件");choose_s21.clicked.connect(lambda:(self.choose_s21_fit(self.s21_file),self.update_selected_frequency()));fields=[("测量频点",self.frequency_mode),("固定频率",self.frequency),("读出功率",self.power),("稳定时间",self.settle),("模式",self.mode),("采集时长",self.duration),("分块点数",self.block),("I通道",self.i),("Q通道",self.q),("Welch window",self.psd_window),("Segment时长",self.segment_seconds),("IQ Norm显示点数",self.iq_plot_points)]
+        super().__init__(window);self.rt=None;self.rd=None;self.rni=None;self.rnq=None;self.s21_i_norm=None;self.s21_q_norm=None;self.test_point=None;layout=QVBoxLayout(self);layout.addWidget(self.status);box=QGroupBox("噪声测量参数");g=QGridLayout(box);self.frequency=QDoubleSpinBox();self.frequency.setRange(.000001,1000);self.frequency.setDecimals(9);self.frequency.setValue(5);self.frequency.setSuffix(" GHz");self.frequency_mode=QComboBox();self.frequency_mode.addItem("手动频率","MANUAL");self.frequency_mode.addItem("拟合频率 f0+df","F0_PLUS_DF");self.frequency_mode.addItem("最大响应点 dI²+dQ²","MAX_RESPONSE");self.frequency_mode.addItem("均衡偏置点 ±45°","BALANCED");self.frequency_mode.setCurrentIndex(1);self.frequency_mode.currentIndexChanged.connect(self.update_selected_frequency);self.power=QDoubleSpinBox();self.power.setRange(-150,30);self.power.setValue(-30);self.power.setSuffix(" dBm");self.settle=QDoubleSpinBox();self.settle.setRange(0,60);self.settle.setValue(.1);self.settle.setSuffix(" s");self.mode=QComboBox();self.mode.addItems(("指定时长","无限连续"));self.duration=QDoubleSpinBox();self.duration.setRange(.001,86400);self.duration.setValue(10);self.duration.setSuffix(" s");self.mode.currentIndexChanged.connect(lambda:self.duration.setEnabled(self.mode.currentIndex()==0));self.block=QSpinBox();self.block.setRange(100,10_000_000);self.block.setValue(10_000);self.i=QComboBox();self.q=QComboBox();[self.i.addItem("ai{}".format(x),x) for x in range(6)];[self.q.addItem("ai{}".format(x),x) for x in range(6)];self.q.setCurrentIndex(1);self.psd_window=QComboBox();self.psd_window.addItems(("hann","hamming","blackman","boxcar"));self.psd_window.setCurrentText("hamming");self.segment_seconds=QDoubleSpinBox();self.segment_seconds.setRange(.000001,86400);self.segment_seconds.setDecimals(6);self.segment_seconds.setValue(1.0);self.segment_seconds.setSuffix(" s");self.iq_plot_points=QSpinBox();self.iq_plot_points.setRange(10,10_000_000);self.iq_plot_points.setValue(10_000);self.folder=QLineEdit(str(NOISE_DATA_DIRECTORY));choose=QPushButton("选择目录");choose.clicked.connect(lambda:self.choose(self.folder));self.calibration_file=QLineEdit(latest_iq_summary());choose_cal=QPushButton("选择校准文件");choose_cal.clicked.connect(lambda:self.choose_calibration(self.calibration_file));self.s21_file=QLineEdit(latest_fitted_s21());self.s21_file.editingFinished.connect(self.update_selected_frequency);choose_s21=QPushButton("选择S21文件");choose_s21.clicked.connect(lambda:(self.choose_s21_fit(self.s21_file),self.update_selected_frequency()));fields=[("测量频点",self.frequency_mode),("固定频率",self.frequency),("读出功率",self.power),("稳定时间",self.settle),("模式",self.mode),("采集时长",self.duration),("分块点数",self.block),("I通道",self.i),("Q通道",self.q),("Welch window",self.psd_window),("Segment时长",self.segment_seconds),("IQ Norm显示点数",self.iq_plot_points)]
         for n,(label,w) in enumerate(fields):r=n//3;c=(n%3)*2;g.addWidget(QLabel(label),r,c);g.addWidget(w,r,c+1)
         g.addWidget(QLabel("数据写入位置"),4,0);g.addWidget(QLabel("所选S21文件的 /noise_measurements 组"),4,1,1,5);g.addWidget(QLabel("IQ校准文件"),5,0);g.addWidget(self.calibration_file,5,1,1,4);g.addWidget(choose_cal,5,5);g.addWidget(QLabel("S21拟合文件"),6,0);g.addWidget(self.s21_file,6,1,1,4);g.addWidget(choose_s21,6,5);layout.addWidget(box);row=QHBoxLayout();self.start=QPushButton("开始噪声采集");self.stop_button=QPushButton("停止");self.stop_button.setEnabled(False);self.file=QLabel("尚未生成文件");self.start.clicked.connect(self.begin);self.stop_button.clicked.connect(self.stop);row.addWidget(self.start);row.addWidget(self.stop_button);row.addWidget(self.file,1);layout.addLayout(row);self.canvas=FigureCanvas(Figure(tight_layout=True));self.axes=self.canvas.figure.subplots(2,2);layout.addWidget(NavigationToolbar(self.canvas,self));layout.addWidget(self.canvas,1)
         self.update_selected_frequency()
@@ -697,13 +569,19 @@ class NoiseTab(BaseMeasurementTab):
             calibration=S21NoiseCalibration.load(self.s21_file.text().strip());frequency,_=calibration.measurement_frequency(mode,self.frequency.value()*1e9);self.frequency.setValue(frequency/1e9)
         except Exception:
             pass
+    def reset(self):
+        """清空累计画布（自动化每段噪声前调用，使画布只含当次测量）。"""
+        self.rt=None;self.rd=None;self.rni=None;self.rnq=None;self.s21_i_norm=None;self.s21_q_norm=None;self.test_point=None
+        for ax in self.axes.ravel():
+            ax.clear()
+        self.canvas.draw_idle()
     def begin(self):
         try:
             if not self.manager.source_connected or not self.manager.daq_connected:raise RuntimeError("请先在“仪器控制”菜单中连接两台设备。")
             if self.window.daq_dialog.preview_worker and self.window.daq_dialog.preview_worker.isRunning():raise RuntimeError("PXIe-4480电压预览正在运行，请先在仪器控制窗口中停止预览。")
             c=self.manager.daq_config;i=int(self.i.currentData());q=int(self.q.currentData());
             if i==q or i not in c["channels"] or q not in c["channels"]:raise ValueError("I/Q必须不同，并且已在PXIe公共配置中选中。")
-            calibration_file=self.calibration_file.text().strip();IQCalibrationTable.load(calibration_file);s21_file=self.s21_file.text().strip();noise_calibration=S21NoiseCalibration.load(s21_file);frequency_mode=str(self.frequency_mode.currentData());selected_frequency,_=noise_calibration.measurement_frequency(frequency_mode,self.frequency.value()*1e9);self.frequency.setValue(selected_frequency/1e9);effective_block=max(self.block.value(),int(round(c["sample_rate"]*1.0)));self.block.setValue(effective_block);p={"frequency_mode":frequency_mode,"manual_frequency":self.frequency.value()*1e9,"power":self.power.value(),"settle":self.settle.value(),"continuous":self.mode.currentIndex()==1,"duration":self.duration.value(),"block":effective_block,"i":i,"q":q,"calibration_file":calibration_file,"s21_file":s21_file,"window":self.psd_window.currentText(),"segment_seconds":self.segment_seconds.value()};path=Path(s21_file);self.rt=None;self.rd=None;self.rni=None;self.rnq=None;self.s21_i_norm=None;self.s21_q_norm=None;self.test_point=None;self.worker=MeasurementWorker(self.manager,"noise",p,path,self);self.worker.noise_block.connect(self.plot);self.worker.file_created.connect(self.file.setText);self.worker.done.connect(self.finished);self.worker.error.connect(self.failure);self.set_running(True);self.worker.start();save_gui_settings(self.window)
+            calibration_file=self.calibration_file.text().strip();IQCalibrationTable.load(calibration_file);s21_file=self.s21_file.text().strip();noise_calibration=S21NoiseCalibration.load(s21_file);frequency_mode=str(self.frequency_mode.currentData());selected_frequency,_=noise_calibration.measurement_frequency(frequency_mode,self.frequency.value()*1e9);self.frequency.setValue(selected_frequency/1e9);effective_block=max(self.block.value(),int(round(c["sample_rate"]*1.0)));self.block.setValue(effective_block);p={"frequency_mode":frequency_mode,"manual_frequency":self.frequency.value()*1e9,"power":self.power.value(),"settle":self.settle.value(),"continuous":self.mode.currentIndex()==1,"duration":self.duration.value(),"block":effective_block,"i":i,"q":q,"calibration_file":calibration_file,"s21_file":s21_file,"window":self.psd_window.currentText(),"segment_seconds":self.segment_seconds.value()};path=Path(s21_file);self.rt=None;self.rd=None;self.rni=None;self.rnq=None;self.s21_i_norm=None;self.s21_q_norm=None;self.test_point=None;self.worker=MeasurementWorker(self.manager,"noise",p,path,self);self.worker.noise_block.connect(self.plot);self.worker.file_created.connect(self.file.setText);self.worker.done.connect(self.finished);self.worker.error.connect(self.failure);self.set_running(True);self.worker.start()
         except Exception as e:QMessageBox.critical(self,"无法开始",str(e))
     def plot(self,t,d,ch,rate):
         block=np.vstack((d["amplitude"],d["phase"]));ni=np.asarray(d["i_norm"]);nq=np.asarray(d["q_norm"]);self.s21_i_norm=np.asarray(d["s21_i_norm"]);self.s21_q_norm=np.asarray(d["s21_q_norm"]);self.test_point=d["test_point"]
@@ -724,8 +602,8 @@ class CombinedMeasurementTab(QWidget):
     """Run fitted S21 followed by noise acquisition with one button."""
     def __init__(self,window):
         super().__init__();self.window=window;self.manager=window.manager;self.active=False;self.stage="idle";self.noise_amp=None;self.noise_phase=None;layout=QVBoxLayout(self);self.status=DeviceStatusBar(self.manager);layout.addWidget(self.status);box=QGroupBox("一键S21与噪声测量参数");g=QGridLayout(box)
-        self.center=QDoubleSpinBox();self.center.setRange(.000001,1000);self.center.setDecimals(9);self.center.setValue(5);self.center.setSuffix(" GHz");self.bandwidth=QDoubleSpinBox();self.bandwidth.setRange(.000001,1_000_000);self.bandwidth.setDecimals(6);self.bandwidth.setValue(20);self.bandwidth.setSuffix(" MHz");self.points=QSpinBox();self.points.setRange(2,1_000_000);self.points.setValue(101);self.samples=QSpinBox();self.samples.setRange(1,10_000_000);self.samples.setValue(1000);self.power=QDoubleSpinBox();self.power.setRange(-150,30);self.power.setValue(-30);self.power.setSuffix(" dBm");self.settle=QDoubleSpinBox();self.settle.setRange(0,60);self.settle.setDecimals(3);self.settle.setValue(.010);self.settle.setSuffix(" s")
-        self.noise_location=QComboBox();self.noise_location.addItem("拟合频率 f0+df","F0_PLUS_DF");self.noise_location.addItem("最大响应点 dI²+dQ²","MAX_RESPONSE");self.noise_duration=QDoubleSpinBox();self.noise_duration.setRange(.001,86400);self.noise_duration.setValue(10);self.noise_duration.setSuffix(" s");self.noise_block=QSpinBox();self.noise_block.setRange(100,10_000_000);self.noise_block.setValue(10_000);self.window_box=QComboBox();self.window_box.addItems(("hann","hamming","blackman","boxcar"));self.window_box.setCurrentText("hamming");self.segment=QDoubleSpinBox();self.segment.setRange(.000001,86400);self.segment.setDecimals(6);self.segment.setValue(1);self.segment.setSuffix(" s");self.i=QComboBox();self.q=QComboBox();[self.i.addItem("ai{}".format(x),x) for x in range(6)];[self.q.addItem("ai{}".format(x),x) for x in range(6)];self.q.setCurrentIndex(1)
+        self.center=QDoubleSpinBox();self.center.setRange(.000001,1000);self.center.setDecimals(9);self.center.setValue(5);self.center.setSuffix(" GHz");self.bandwidth=QDoubleSpinBox();self.bandwidth.setRange(.000001,1_000_000);self.bandwidth.setDecimals(6);self.bandwidth.setValue(20);self.bandwidth.setSuffix(" MHz");self.points=QSpinBox();self.points.setRange(2,1_000_000);self.points.setValue(201);self.samples=QSpinBox();self.samples.setRange(1,10_000_000);self.samples.setValue(1000);self.power=QDoubleSpinBox();self.power.setRange(-150,30);self.power.setValue(-30);self.power.setSuffix(" dBm");self.settle=QDoubleSpinBox();self.settle.setRange(0,60);self.settle.setDecimals(3);self.settle.setValue(.05);self.settle.setSuffix(" s")
+        self.noise_location=QComboBox();self.noise_location.addItem("拟合频率 f0+df","F0_PLUS_DF");self.noise_location.addItem("最大响应点 dI²+dQ²","MAX_RESPONSE");self.noise_location.addItem("均衡偏置点 ±45°","BALANCED");self.noise_duration=QDoubleSpinBox();self.noise_duration.setRange(.001,86400);self.noise_duration.setValue(10);self.noise_duration.setSuffix(" s");self.noise_block=QSpinBox();self.noise_block.setRange(100,10_000_000);self.noise_block.setValue(10_000);self.window_box=QComboBox();self.window_box.addItems(("hann","hamming","blackman","boxcar"));self.window_box.setCurrentText("hamming");self.segment=QDoubleSpinBox();self.segment.setRange(.000001,86400);self.segment.setDecimals(6);self.segment.setValue(1);self.segment.setSuffix(" s");self.i=QComboBox();self.q=QComboBox();[self.i.addItem("ai{}".format(x),x) for x in range(6)];[self.q.addItem("ai{}".format(x),x) for x in range(6)];self.q.setCurrentIndex(1)
         self.resonator=QLineEdit("res0");self.temperature=QDoubleSpinBox();self.temperature.setRange(.001,1_000_000);self.temperature.setDecimals(3);self.temperature.setValue(100);self.temperature.setSuffix(" mK");self.fit_power=QDoubleSpinBox();self.fit_power.setRange(-150,30);self.fit_power.setValue(-60);self.fit_power.setSuffix(" dBm");self.calibration_file=QLineEdit(latest_iq_summary());choose_cal=QPushButton("选择校准文件");choose_cal.clicked.connect(self.choose_calibration);self.folder=QLineEdit(str(S21_DATA_DIRECTORY));choose_folder=QPushButton("选择目录");choose_folder.clicked.connect(self.choose_folder)
         fields=(("中心频率",self.center),("扫描带宽",self.bandwidth),("S21频点数",self.points),("每频点采样数",self.samples),("输出功率",self.power),("稳定时间",self.settle),("噪声频点",self.noise_location),("噪声时长",self.noise_duration),("噪声分块点数",self.noise_block),("Welch window",self.window_box),("Segment时长",self.segment),("I通道",self.i),("Q通道",self.q),("谐振器名称",self.resonator),("温度",self.temperature),("读出功率",self.fit_power))
         for n,(label,widget) in enumerate(fields):row=n//4;column=(n%4)*2;g.addWidget(QLabel(label),row,column);g.addWidget(widget,row,column+1)
@@ -742,7 +620,7 @@ class CombinedMeasurementTab(QWidget):
         if (self.window.s21.worker and self.window.s21.worker.isRunning()) or (self.window.noise.worker and self.window.noise.worker.isRunning()):QMessageBox.warning(self,"无法开始","S21或噪声测量正在运行。");return
         s=self.window.s21;s.center_f.setValue(self.center.value());s.bandwidth_mhz.setValue(self.bandwidth.value());s.points.setValue(self.points.value());s.samples.setValue(self.samples.value());s.power.setValue(self.power.value());s.settle.setValue(self.settle.value());s.i.setCurrentIndex(self.i.currentIndex());s.q.setCurrentIndex(self.q.currentIndex());s.fit_enabled.setChecked(True);s.resonator_name.setText(self.resonator.text());s.temperature.setValue(self.temperature.value());s.fit_power.setValue(self.fit_power.value());s.calibration_file.setText(self.calibration_file.text());s.folder.setText(self.folder.text());self.noise_amp=None;self.noise_phase=None;self.active=True;self.stage="s21";self.start.setEnabled(False);self.stop.setEnabled(True);self.progress.setRange(0,self.points.value());self.message.setText("正在测量S21...");s.begin()
         if s.worker is None:self.fail("S21测量未能启动。")
-        else:s.worker.s21_point.connect(self.plot_s21);s.worker.s21_fit_ready.connect(self.plot_s21_fit);s.worker.error.connect(self.fail);save_gui_settings(self.window)
+        else:s.worker.s21_point.connect(self.plot_s21);s.worker.s21_fit_ready.connect(self.plot_s21_fit);s.worker.error.connect(self.fail)
     def plot_s21(self,f,m,p,n,total):
         x=np.asarray(f)/1e9;self.axes[0,0].clear();self.axes[0,0].plot(x,m);self.axes[0,0].set_title("S21 magnitude");self.axes[0,0].set_xlabel("Frequency (GHz)");self.axes[0,0].set_ylabel("dB");self.axes[0,0].grid(True,alpha=.3);self.axes[0,1].clear();self.axes[0,1].plot(x,p);self.axes[0,1].set_title("S21 phase");self.axes[0,1].set_xlabel("Frequency (GHz)");self.axes[0,1].set_ylabel("deg");self.axes[0,1].grid(True,alpha=.3);self.progress.setValue(n);self.canvas.draw_idle()
     def plot_s21_fit(self,result):
@@ -1142,7 +1020,6 @@ class IQCalibrationTab(QWidget):
             self.window.p5002_window.setEnabled(False)
             self.window.daq_dialog.setEnabled(False)
             self.worker.start()
-            save_gui_settings(self.window)
         except Exception as error:
             QMessageBox.critical(self, "无法开始IQ校准", str(error))
 
@@ -1236,7 +1113,68 @@ class IQCalibrationTab(QWidget):
 
 class MainWindow(QMainWindow):
     def __init__(self):
-        super().__init__();self.manager=InstrumentManager();self.setWindowTitle("KID S21、噪声与IQ校准系统 v3");self.resize(1400,900);self.p5002_window=PersistentP5002AWindow();self.manager.p5002_window=self.p5002_window;self.s21=S21Tab(self);self.noise=NoiseTab(self);self.combined=CombinedMeasurementTab(self);self.iq=IQCalibrationTab(self);tabs=QTabWidget();tabs.addTab(self.combined,"S21+噪声一键测量");tabs.addTab(self.s21,"S21扫描测量");tabs.addTab(self.noise,"噪声采集");tabs.addTab(self.iq,"IQ校准");self.setCentralWidget(tabs);self.setStatusBar(QStatusBar());self.source_dialog=E8257DDialog(self.manager,self);self.daq_dialog=PXIeDialog(self.manager,self);self.source_dialog.state_changed.connect(self.refresh_status);self.daq_dialog.state_changed.connect(self.refresh_status);menu=self.menuBar().addMenu("仪器控制");a=QAction("E8257D控制与连接",self);b=QAction("PXIe-4480控制与配置",self);c=QAction("P5002A控制与连接",self);a.triggered.connect(self.open_source);b.triggered.connect(self.open_daq);c.triggered.connect(self.open_p5002);menu.addAction(a);menu.addAction(c);menu.addAction(b);self._last_connections=(False,False,False);self._pending_parameter_sync=set();self.status_timer=QTimer(self);self.status_timer.timeout.connect(self.refresh_status);self.status_timer.start(500);self.statusBar().showMessage("请从“仪器控制”菜单连接设备");load_gui_settings(self)
+        super().__init__()
+        self.manager = InstrumentManager()
+        self.config = gui_config.load_gui_config()
+        self.manager.config = self.config
+        self.setWindowTitle("KID 个人测量系统（基于 V3）")
+        self.resize(1400, 900)
+        self.p5002_window = PersistentP5002AWindow()
+        self.manager.p5002_window = self.p5002_window
+        self.s21 = S21Tab(self)
+        self.noise = NoiseTab(self)
+        self.combined = CombinedMeasurementTab(self)
+        self.iq = IQCalibrationTab(self)
+        # ---- 新增两个 Tab ----
+        self.instruments_tab = InstrumentsTab(self)
+        self.auto_tab = AutoTab(self)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.combined, "S21+噪声一键测量")
+        self.tabs.addTab(self.s21, "S21扫描测量")
+        self.tabs.addTab(self.noise, "噪声采集")
+        self.tabs.addTab(self.iq, "IQ校准")
+        self.tabs.addTab(self.auto_tab, "自动化测量流程")
+        self.tabs.addTab(self.instruments_tab, "仪器与连接")
+        self.setCentralWidget(self.tabs)
+        self.setStatusBar(QStatusBar())
+        self.source_dialog = E8257DDialog(self.manager, self)
+        self.daq_dialog = PXIeDialog(self.manager, self)
+        self.source_dialog.state_changed.connect(self.refresh_status)
+        self.daq_dialog.state_changed.connect(self.refresh_status)
+        menu = self.menuBar().addMenu("仪器控制")
+        a = QAction("E8257D控制与连接", self)
+        b = QAction("PXIe-4480控制与配置", self)
+        c = QAction("P5002A控制与连接", self)
+        a.triggered.connect(self.open_source)
+        b.triggered.connect(self.open_daq)
+        c.triggered.connect(self.open_p5002)
+        menu.addAction(a)
+        menu.addAction(c)
+        menu.addAction(b)
+        self._last_connections = (False, False, False)
+        self._pending_parameter_sync = set()
+        self.status_timer = QTimer(self)
+        self.status_timer.timeout.connect(self.refresh_status)
+        self.status_timer.start(500)
+        # 新增：低频轮询 LakeShore/激光实时值（VISA 查询较重，不宜 500ms）
+        self.instrument_status_timer = QTimer(self)
+        self.instrument_status_timer.timeout.connect(self.instruments_tab.poll_status)
+        self.instrument_status_timer.start(2000)
+        # ---- 自动保存/恢复上次使用的参数（gui_user_settings.json）----
+        # 此刻 6 个 Tab 与 PXIe 对话框均已构建：先快照 gui_config 默认，
+        # 再叠加上次使用值，最后接变更信号（500ms 防抖落盘）。
+        self._default_widget_state = settings_persistence.collect_all(self)
+        settings_persistence.apply_all(self, gui_config.load_user_settings())
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(500)
+        self._autosave_timer.timeout.connect(self._flush_user_settings)
+        settings_persistence.wire_auto_save(self, self._on_parameter_change)
+        menu_settings = self.menuBar().addMenu("设置")
+        a_reset = QAction("恢复默认设置", self)
+        a_reset.triggered.connect(self.reset_user_settings)
+        menu_settings.addAction(a_reset)
+        self.statusBar().showMessage("请从「仪器控制」菜单或「仪器与连接」页连接设备")
     def sync_measurement_defaults(self,instrument):
         if instrument=="source" and self.manager.source_connected:
             state=self.manager.source_status;frequency=state.get("frequency_ghz");power=state.get("power_dbm")
@@ -1259,10 +1197,26 @@ class MainWindow(QMainWindow):
         if "p5002" in self._pending_parameter_sync and (self.p5002_window.task is None or not self.p5002_window.task.isRunning()):self.sync_measurement_defaults("p5002");self._pending_parameter_sync.discard("p5002")
         if "daq" in self._pending_parameter_sync:self._pending_parameter_sync.discard("daq")
         self._last_connections=current
+        self.instruments_tab.update_connection_states()
     def sync_instrument_controls(self):
         if self.manager.source_connected:self.source_dialog.refresh()
         if self.manager.p5002_connected:self.p5002_window.refresh_instrument_status()
         self.daq_dialog.refresh()
+    def _on_parameter_change(self,*args):
+        # 任一控件变化（每按键/每切换）→ 重启防抖计时器；500ms 静默后落盘。
+        self._autosave_timer.start()
+    def _flush_user_settings(self):
+        try:
+            settings_persistence.save_now(self)
+        except Exception:
+            pass
+    def reset_user_settings(self):
+        if QMessageBox.question(self,"恢复默认设置",
+                "清除上次使用的参数并恢复默认设置？\n（gui_config.json 不受影响）") \
+                != QMessageBox.Yes:
+            return
+        settings_persistence.reset_to_defaults(self)
+        self.statusBar().showMessage("已清除上次使用参数，恢复默认设置")
     def open_source(self):
         self.source_dialog.refresh()
         self.source_dialog.show();self.source_dialog.raise_();self.source_dialog.activateWindow()
@@ -1271,18 +1225,34 @@ class MainWindow(QMainWindow):
         self.p5002_window.show();self.p5002_window.raise_();self.p5002_window.activateWindow()
         if self.manager.p5002_connected:self.p5002_window.refresh_instrument_status()
     def closeEvent(self,event):
-        save_gui_settings(self)
         workers=[x.worker for x in (self.s21,self.noise,self.iq) if x.worker and x.worker.isRunning()]
         if self.daq_dialog.preview_worker and self.daq_dialog.preview_worker.isRunning():workers.append(self.daq_dialog.preview_worker)
+        if self.auto_tab.worker and self.auto_tab.worker.isRunning():workers.append(self.auto_tab.worker)
         for w in workers:
             if isinstance(w,PXIePreviewWorker):w.request_stop()
             else:w.stop()
         for w in workers:
             if not w.wait(5000):event.ignore();QMessageBox.warning(self,"请稍候","测量仍在停止。");return
-        self.manager.disconnect_all();event.accept()
+        self.manager.disconnect_all()
+        # 关窗前落盘上次使用参数（gui_user_settings.json）；gui_config.json 仍照旧。
+        try:
+            settings_persistence.save_now(self)
+        except Exception:
+            pass
+        # 关窗仅保存基础配置（含仪器地址，由仪器页连接时更新）；自动化页默认值
+        # 只通过「保存当前设置为默认」按钮显式持久化，避免误覆盖实验名/保存路径。
+        try:
+            gui_config.save_gui_config(self.config)
+        except Exception:
+            pass
+        event.accept()
 
 
 def main():
+    import warnings
+    # 压掉 h5py 新版本对"空 shape 建数据集"的弃用警告（既有 core 代码行为）
+    warnings.filterwarnings("ignore",
+                            message=".*Creating a dataset without passing data or dtype.*")
     app=QApplication(sys.argv);app.setStyle("Fusion");window=MainWindow();window.show();sys.exit(app.exec_())
 
 

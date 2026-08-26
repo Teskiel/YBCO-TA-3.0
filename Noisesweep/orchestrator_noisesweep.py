@@ -51,11 +51,13 @@ LOG = logging.getLogger("noisesweep")
 # 内置默认（config 为 null 且不继承 UI 时使用）
 DEFAULTS = {
     "temperature_list_k": [4.0, 20.0, 40.0, 77.0],
+    "fixed_temperature_k": 77.0,          # 无温控（lakeshore_visa_address 为空）时的假设温度
     "stability_tolerance_k": 0.05,
     "stability_hold_s": 60.0,
     "stability_poll_s": 5.0,
     "stability_max_wait_s": 1800.0,
     "abort_on_unstable": False,
+    "temperature_mismatch_limit_k": 1.0,  # 已连接 LakeShore 时 |目标-实测| 超过该值 → 弹窗中止
     "lakeshore_channel": "A",
     "laser_wavelength_nm": 1550.0,
     "laser_power_mw": [0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 17.0],
@@ -103,8 +105,9 @@ DEFAULTS = {
     "channels": [0, 1],
     "pxie_device_name": "PXI2Slot2",
     "e8257d_visa_address": "",
-    "lakeshore_visa_address": "ASRL4::INSTR",
-    "laser_visa_address": "TCPIP0::K-N7779C-00108::inst0::INSTR",
+    # 温控/激光默认无地址：config 不填时由 backends 工厂返回 FixedTemperature/NullLaser（可选硬件）
+    "lakeshore_visa_address": "",
+    "laser_visa_address": "",
     "lakeshore_heater_range": None,
     "lakeshore_pid": None,
 }
@@ -392,13 +395,13 @@ def _fine_has_noise(path) -> bool:
 
 
 def _point_done_offline(point_dir, skip_noise) -> bool:
-    """文件级完成判定：point_dir=<T>K/<res>/<power>mW 下任一实际温度文件夹
-    已有 coarse+fine 且（跳过噪声或 fine 已有噪声组）。实际温度文件夹名会漂移，
-    故按 glob 查找而非拼固定路径。"""
+    """文件级完成判定：point_dir=<实测T>K/<res>/<power>mW 下直接有 coarse+fine
+    且（跳过噪声或 fine 已有噪声组）。实际温度子文件夹已取消，文件直接落
+    point_dir，故按扁平 glob 查找。"""
     if not point_dir.exists():
         return False
-    coarse = list(point_dir.glob("*/coarse_s21.h5"))
-    fine = list(point_dir.glob("*/fine_s21.h5"))
+    coarse = list(point_dir.glob("coarse_s21.h5"))
+    fine = list(point_dir.glob("fine_s21.h5"))
     if not (coarse and fine):
         return False
     if skip_noise:
@@ -425,12 +428,178 @@ def _save_figures(fine_path, pic_dir, log):
         log.warning("    保存图像失败（不影响测量）: %s", exc)
 
 
+def _pic_name(meta):
+    """从上下文生成信息文件名：res5_P0mW_T9.6K_Ta9.58K_YBCO1145_noise.png"""
+    res = str(meta.get("res_name", "res?"))
+    p = float(meta.get("power_mw", 0.0))
+    tk = float(meta.get("target_k", 0.0))
+    ak = float(meta.get("actual_k", tk))
+    chip = str(meta.get("chip_id", "")).replace("#", "-") or "n-a"
+    typ = str(meta.get("type", "fig"))
+    return "{}_P{:g}mW_T{:g}K_Ta{:g}K_{}_{}.png".format(res, p, tk, ak, chip, typ)
+
+
+def _pic_annotation(meta):
+    """图上正上方标注：T_target / T_actual / chip / 功率 / 谐振 / 类型 / 频点模式。"""
+    tk = float(meta.get("target_k", 0.0))
+    ak = float(meta.get("actual_k", tk))
+    chip = str(meta.get("chip_id", "")) or "n/a"
+    res = str(meta.get("res_name", "?"))
+    p = float(meta.get("power_mw", 0.0))
+    typ = str(meta.get("type", "fig"))
+    s = "T_target={:.2f} K  T_actual={:.2f} K  chip={}  P={:g} mW  res={}  type={}" \
+        .format(tk, ak, chip, p, res, typ)
+    mode = str(meta.get("mode", ""))
+    if mode:
+        s += "  mode={}".format(mode)
+    return s
+
+
+def _save_noise_figures(fine_path, meta, log):
+    """headless 复写噪声四块图（CLI/验证用，自动化 GUI 走面板画布）。
+
+    读 fine_s21.h5 的每个 /noise_measurements/* 组，画与 GUI 噪声面板一致的四块布局
+    （幅度时域 / Welch PSD / 相位时域 / IQ 圆+测试点），写入
+    `<save_root>/<目标T>K/PIC/noise/{_pic_name}` 并加 suptitle 标注。
+    """
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    import h5py
+    if not meta.get("save_root"):
+        return
+    with h5py.File(fine_path, "r") as h:
+        if "noise_measurements" not in h:
+            return
+        sf = h["scraps_fit"]
+        s21_i = np.asarray(sf["INorm"][:], dtype=float)
+        s21_q = np.asarray(sf["QNorm"][:], dtype=float)
+        for gname, g in h["noise_measurements"].items():
+            mode = str(g.attrs.get("frequency_selection_mode", "UNKNOWN"))
+            m = dict(meta)
+            m["group"] = "noise"
+            m["mode"] = mode
+            m["type"] = ("noise" if mode.upper() == "F0_PLUS_DF"
+                         else "noise_{}".format(mode.upper()))
+            pic_dir = Path(m["save_root"]) / fmt_K(float(m["target_k"])) / "PIC" / "noise"
+            pic_dir.mkdir(parents=True, exist_ok=True)
+            name = _pic_name(m)
+            freq = np.asarray(g["noise_spectrum_frequency_hz"][:], dtype=float)
+            amp_psd = np.asarray(g["amplitude_psd_per_hz"][:], dtype=float)
+            ph_psd = np.asarray(g["phase_psd_rad2_per_hz"][:], dtype=float)
+            seg = np.asarray(g["noise_amplitude"][:], dtype=float)
+            phs = np.asarray(g["noise_phase_rad"][:], dtype=float)
+            tt = np.asarray(g["time_s"][:], dtype=float)
+            step = max(1, seg.size // 20000)
+            n_iq = np.asarray(g["normalized_noise_iq"][:], dtype=float)
+            ref_i = int(g.attrs.get("s21_reference_index", 0))
+            test_point = (s21_i[ref_i], s21_q[ref_i])
+            count = min(10000, n_iq.shape[1])
+            pstep = max(1, count // 20000)
+            win = str(g.attrs.get("welch_window", "??"))
+            nperseg = int(round(float(g.attrs.get("welch_segment_seconds", 1.0))
+                                * float(g.attrs.get("actual_sample_rate_hz", 1.0))))
+            fig = Figure(figsize=(12, 7))
+            FigureCanvasAgg(fig)
+            axes = fig.subplots(2, 2)
+            axes[0, 0].plot(tt[::step], seg[::step], linewidth=.8)
+            axes[0, 0].set_xlabel("Time (s)"); axes[0, 0].set_ylabel("Amplitude")
+            axes[0, 0].grid(True, alpha=.3)
+            if freq.size > 1:
+                axes[0, 1].loglog(freq[1:], amp_psd[1:], linewidth=.8, label="Amplitude PSD")
+                axes[0, 1].loglog(freq[1:], ph_psd[1:], linewidth=.8, label="Phase PSD")
+            axes[0, 1].set_xlabel("Frequency (Hz)")
+            axes[0, 1].set_ylabel("PSD (1/Hz or rad²/Hz)")
+            axes[0, 1].set_title("Welch PSD: window={}, nperseg={}".format(win, nperseg))
+            axes[0, 1].grid(True, which="both", alpha=.3); axes[0, 1].legend()
+            axes[1, 0].plot(tt[::step], phs[::step], linewidth=.8)
+            axes[1, 0].set_xlabel("Time (s)"); axes[1, 0].set_ylabel("Unwrapped phase (rad)")
+            axes[1, 0].grid(True, alpha=.3)
+            axes[1, 1].plot(s21_i, s21_q, ".-", markersize=3, linewidth=.8,
+                            label="S21 INorm/QNorm")
+            axes[1, 1].plot([test_point[0]], [test_point[1]], "o", markersize=8,
+                            label="noise test point")
+            axes[1, 1].plot(n_iq[0, -count::pstep], n_iq[1, -count::pstep], ".",
+                            markersize=2, label="noise IQ Norm")
+            axes[1, 1].set_xlabel("I Norm"); axes[1, 1].set_ylabel("Q Norm")
+            axes[1, 1].set_title("S21 curve and normalized noise IQ (last {} points)".format(count))
+            axes[1, 1].axis("equal"); axes[1, 1].grid(True, alpha=.3); axes[1, 1].legend()
+            fig.suptitle(_pic_annotation(m), fontsize=10)
+            fig.tight_layout(rect=[0, 0, 1, 0.94])
+            fig.savefig(str(pic_dir / name), dpi=150)
+            log.info("    噪声图已保存: %s", pic_dir / name)
+
+
 # =========================================================================
 # 三层编排
 # =========================================================================
 
 class AbortRun(Exception):
     pass
+
+
+class TemperatureMismatch(AbortRun):
+    """目标温度与 LakeShore 实测温度相差超过 temperature_mismatch_limit_k。
+
+    由 resolve_temperature 抛出：GUI 经 worker.failed → QMessageBox 弹窗中止；
+    CLI 进入 run() 的 except TemperatureMismatch 分支并走异常清理。
+    """
+
+    def __init__(self, target_k, actual_k, limit_k):
+        super().__init__(
+            "目标 {:.2f} K 与实测 {:.4f} K 相差超过 {:.1f} K，中止测量"
+            .format(target_k, actual_k, limit_k)
+        )
+
+
+def _temperature_mismatch_limit(config) -> float:
+    return float(config.get("temperature_mismatch_limit_k", 1.0))
+
+
+def _check_temperature_mismatch(T, actual_T, config):
+    limit = _temperature_mismatch_limit(config)
+    if abs(float(T) - float(actual_T)) > limit:
+        raise TemperatureMismatch(float(T), float(actual_T), limit)
+
+
+def resolve_temperature(T, config, temp, log):
+    """解析温控目标/实测（automation_worker 与 CLI run 共用）。
+
+    规则（用户约定）：
+      * 未连接 LakeShore（temp.is_fixed，含 mock）→ 手动输入温度同时作为
+        目标与实测，返回 (T, T, stable=True)。
+      * 已连接：
+        - drive_temperature=True → set_temperature + wait_for_stability，
+          返回 (T, actual_T, stable)。
+        - 否则直接读实测 actual_T。
+        已连接分支统一校验 |T - actual_T| > temperature_mismatch_limit_k
+        即抛 TemperatureMismatch（GUI 弹窗 + 中止；CLI 进入 AbortRun 清理）。
+
+    Returns:
+        (T_target, actual_T, stable)
+    """
+    T = float(T)
+    if getattr(temp, "is_fixed", False):
+        log.info("无温控（LakeShore 未连接，含 mock），手动温度 %.2f K 同时作为目标/实测", T)
+        return T, T, True
+
+    if config.get("drive_temperature"):
+        temp.set_temperature(T)
+        actual_T, stable = wait_for_stability(
+            temp, T, config["stability_tolerance_k"],
+            config["stability_hold_s"], config["stability_poll_s"],
+            config["stability_max_wait_s"], config["lakeshore_channel"], log)
+        if not stable:
+            log.warning("T=%.2f K 未稳定（实际 %.4f K）", T, actual_T)
+            if config.get("abort_on_unstable"):
+                raise RuntimeError("温度不稳定，按配置中止")
+        _check_temperature_mismatch(T, actual_T, config)
+        return T, actual_T, stable
+
+    # 已连接、不驱动温控 → 读实测，过 1K 守卫
+    actual_T = float(temp.get_temperature(config["lakeshore_channel"]))
+    log.info("LakeShore 已连接：目标 %.2f K，实测 %.4f K", T, actual_T)
+    _check_temperature_mismatch(T, actual_T, config)
+    return T, actual_T, True
 
 
 def _fallback_reference(config, table, res, res_idx, actual_T, power_mw, log):
@@ -479,7 +648,7 @@ def _resolve_reference(config, table, res, res_idx, actual_T, power_mw, log):
     return f_ref, pred_half
 
 
-def run_one_point(config, ctx, source, laser, table, checkpoint, stop_event,
+def run_one_point(config, measure, source, laser, table, checkpoint, stop_event,
                   T, actual_T, res, res_idx, power_mw, save_root,
                   force, skip_noise, mock_instruments, log,
                   f_ref_override=None):
@@ -489,13 +658,15 @@ def run_one_point(config, ctx, source, laser, table, checkpoint, stop_event,
     本函数做：设激光 → 频率预测 → 宽扫 → 精扫 → 存图 → 噪声 → mark_complete。
     返回 True 表示实际测量；False 表示因幂等跳过。
 
+    measure 是测量引擎（s21/noise 方法）：自动化 GUI 传 PanelMeasure（面板
+    MeasurementWorker 代码，core 禁用），CLI 传 CoreMeasure（core.run_*）。
     f_ref_override 非 None 时跳过频率来源三选一，直接以给定频率作宽扫中心
     （scan 命令用手动中心频率）；None 走 _resolve_reference。
     """
     res_name = res["name"]
     log.info("  [res=%s, power=%s mW]", res_name, power_mw)
 
-    point_dir = save_root / fmt_K(T) / res_name / fmt_mW(power_mw)
+    point_dir = save_root / fmt_K(actual_T) / res_name / fmt_mW(power_mw)
     if not force and checkpoint.is_complete(T, res_name, power_mw):
         log.info("    checkpoint 已完成，跳过")
         return False
@@ -520,11 +691,12 @@ def run_one_point(config, ctx, source, laser, table, checkpoint, stop_event,
         config["fine_bandwidth_interpolation"],
     )
 
-    res_dir = point_dir / fmt_K(actual_T)
+    res_dir = point_dir
     res_dir.mkdir(parents=True, exist_ok=True)
 
     extra_attrs = {
         "temperature_k": float(actual_T),
+        "temperature_target_k": float(T),
         "laser_power_mw": float(power_mw),
         "laser_wavelength_nm": float(config["laser_wavelength_nm"]),
     }
@@ -535,8 +707,8 @@ def run_one_point(config, ctx, source, laser, table, checkpoint, stop_event,
         mock_instruments.set_resonance_position(f_ref)
     log.info("    宽扫: center %.6f GHz, bw %.0f MHz → %s",
              f_ref / 1e9, wide_bw / 1e6, coarse_path)
-    r_coarse = core.run_s21(ctx, _s21_params(
-        config, f_ref, wide_bw, res_name, actual_T, extra_attrs), coarse_path)
+    r_coarse = measure.s21(
+        config, f_ref, wide_bw, res_name, actual_T, extra_attrs, coarse_path)
     if r_coarse.fit_ok:
         log.info("    宽扫 f0 = %.6f GHz (df %.3f kHz)",
                  r_coarse.resonance_frequency_hz / 1e9,
@@ -551,8 +723,8 @@ def run_one_point(config, ctx, source, laser, table, checkpoint, stop_event,
         mock_instruments.set_resonance_position(center_fine)
     log.info("    精扫: center %.6f GHz, bw %.1f MHz → %s",
              center_fine / 1e9, fine_bw / 1e6, fine_path)
-    r_fine = core.run_s21(ctx, _s21_params(
-        config, center_fine, fine_bw, res_name, actual_T, extra_attrs), fine_path)
+    r_fine = measure.s21(
+        config, center_fine, fine_bw, res_name, actual_T, extra_attrs, fine_path)
     if r_fine.fit_ok:
         log.info("    精扫 f0 = %.6f GHz", r_fine.resonance_frequency_hz / 1e9)
     else:
@@ -562,12 +734,26 @@ def run_one_point(config, ctx, source, laser, table, checkpoint, stop_event,
     if config.get("save_figures", True):
         _save_figures(fine_path, res_dir / "pic", log)
 
-    # 阶段 3：噪声
+    # 图片上下文（文件名与 suptitle 标注用）：目标温度/实际温度/芯片/功率/谐振
+    meta_base = {
+        "save_root": str(save_root),
+        "target_k": T,
+        "actual_k": actual_T,
+        "chip_id": str(config.get("chip_id", "")),
+        "res_name": res_name,
+        "res_index": res_idx,
+        "power_mw": power_mw,
+    }
+
+    # 阶段 3：噪声（面板所选频点，与面板3 一致；每点只测一次）
     if not skip_noise:
         log.info("    噪声: mode=%s, %.1f s → %s",
                  config["noise_frequency_mode"], config["noise_duration_s"],
                  fine_path)
-        core.run_noise(ctx, _noise_params(config), fine_path)
+        measure.noise(config, config["noise_frequency_mode"], fine_path, meta_base)
+    # headless 复写（CLI 用）：自动化 GUI 走面板画布（save_figures 被强制 False）。
+    if not skip_noise and config.get("save_figures", True):
+        _save_noise_figures(fine_path, meta_base, log)
 
     checkpoint.mark_complete(T, res_name, power_mw, center_fine, fine_path)
     log.info("    [完成] (T=%.1f K, %s, %s mW)", T, res_name, power_mw)
@@ -666,6 +852,13 @@ def run(config, args):
             names = args.only_res
             resonators = [r for r in resonators if r["name"] in names]
 
+        fixed_k = float(config.get("fixed_temperature_k", 77.0))
+        if getattr(temp, "is_fixed", False):
+            if len(temps) > 1:
+                log.warning("无温控（FixedTemperature）：temperature_list_k 多于 1 个温度，"
+                            "强制单点 %.2f K", fixed_k)
+            temps = [fixed_k]
+
         log.info("计划: %d 温度 × %d 谐振器 × %d 功率 = %d 点",
                  len(temps), len(resonators), len(powers),
                  len(temps) * len(resonators) * len(powers))
@@ -674,12 +867,7 @@ def run(config, args):
             if stop_event.is_set():
                 break
             log.info("=== 温度 %.2f K ===", T)
-            temp.set_temperature(T)
-            actual_T, stable = wait_for_stability(
-                temp, T, config["stability_tolerance_k"],
-                config["stability_hold_s"], config["stability_poll_s"],
-                config["stability_max_wait_s"], config["lakeshore_channel"], log,
-            )
+            _T, actual_T, stable = resolve_temperature(T, config, temp, log)
             checkpoint.mark_temperature(T, actual_T, stable)
             if not stable:
                 log.error("T=%.2f K 未在 %s s 内稳定（实际 %.4f K）",
@@ -696,9 +884,9 @@ def run(config, args):
                 for power_mw in powers:
                     if stop_event.is_set():
                         break
-                    run_one_point(config, ctx, source, laser, table, checkpoint,
-                                  stop_event, T, actual_T, res, res_idx,
-                                  power_mw, save_root, args.force,
+                    run_one_point(config, CoreMeasure(ctx), source, laser,
+                                  table, checkpoint, stop_event, T, actual_T,
+                                  res, res_idx, power_mw, save_root, args.force,
                                   args.skip_noise, mock_instruments, log)
 
             laser.set_power(0)   # 该温度点结束 → 关激光
@@ -707,6 +895,9 @@ def run(config, args):
     except KeyboardInterrupt:
         abnormal = True
         log.error("用户中断（Ctrl+C）")
+    except TemperatureMismatch as exc:
+        abnormal = True
+        log.error("运行中止: %s", exc)
     except AbortRun:
         abnormal = True
         log.error("运行中止: 温度不稳定")
@@ -742,22 +933,82 @@ def _s21_params(config, center_hz, bandwidth_hz, res_name, T_k, extra_attrs):
     )
 
 
-def _noise_params(config):
+def _noise_params(config, frequency_mode=None):
+    """core.NoiseParams（CLI/mock 用）；值与面板噪声参数对齐（collect_config 已读面板控件）。"""
     return core.NoiseParams(
         s21_file="",   # run_noise 用第二个参数 s21_file
-        frequency_mode=config["noise_frequency_mode"],
+        frequency_mode=frequency_mode or config["noise_frequency_mode"],
         manual_frequency_hz=float(config.get("noise_manual_frequency_hz", 0.0)),
-        power_dbm=float(config["readout_power_dbm"]),
-        settle_s=float(config["settle_s"]),
-        continuous=False,
+        power_dbm=float(config.get("noise_power_dbm",
+                                   config.get("readout_power_dbm", -30.0))),
+        settle_s=float(config.get("noise_settle_s", config.get("settle_s", 0.1))),
+        continuous=bool(config.get("noise_continuous", False)),
         duration_s=float(config["noise_duration_s"]),
-        block=int(config["noise_block_samples"]),
+        block=max(int(config["noise_block_samples"]),
+                  int(round(float(config["sample_rate"])))),
         i_channel=int(config["i_channel"]),
         q_channel=int(config["q_channel"]),
         calibration_file=config["iq_calibration_file"],
         window=config["welch_window"],
         segment_seconds=float(config["welch_segment_seconds"]),
     )
+
+
+def _s21_panel_p(config, center_hz, bandwidth_hz, res_name, T_k, extra_attrs):
+    """面板 MeasurementWorker 期望的 S21 参数字典（值来自 config=面板控件）。"""
+    return {
+        "start": center_hz - bandwidth_hz / 2,
+        "stop": center_hz + bandwidth_hz / 2,
+        "center": center_hz,
+        "bandwidth": bandwidth_hz,
+        "points": int(config["s21_points"]),
+        "samples": int(config["samples_per_point"]),
+        "power": float(config["readout_power_dbm"]),
+        "settle": float(config["settle_s"]),
+        "i": int(config["i_channel"]),
+        "q": int(config["q_channel"]),
+        "calibration_file": config["iq_calibration_file"],
+        "fit_enabled": True,
+        "resonator_name": res_name,
+        "temperature_k": float(T_k),
+        "readout_power_dbm": float(config["scraps_readout_power_dbm"]),
+        "extra_attrs": dict(extra_attrs or {}),
+    }
+
+
+def _noise_panel_p(config, frequency_mode, s21_file):
+    """面板 MeasurementWorker 期望的噪声参数字典（值来自 config=面板控件）。"""
+    return {
+        "frequency_mode": str(frequency_mode),
+        "manual_frequency": float(config.get("noise_manual_frequency_hz", 0.0)),
+        "power": float(config.get("noise_power_dbm",
+                                  config.get("readout_power_dbm", -30.0))),
+        "settle": float(config.get("noise_settle_s", config.get("settle_s", 0.1))),
+        "continuous": bool(config.get("noise_continuous", False)),
+        "duration": float(config["noise_duration_s"]),
+        "block": max(int(config["noise_block_samples"]),
+                     int(round(float(config["sample_rate"])))),
+        "i": int(config["i_channel"]),
+        "q": int(config["q_channel"]),
+        "calibration_file": config["iq_calibration_file"],
+        "s21_file": str(s21_file),
+        "window": config["welch_window"],
+        "segment_seconds": float(config["welch_segment_seconds"]),
+    }
+
+
+class CoreMeasure:
+    """core.run_s21/run_noise 引擎（CLI 用）。自动化 GUI 走 PanelMeasure（面板代码）。"""
+
+    def __init__(self, ctx):
+        self._ctx = ctx
+
+    def s21(self, config, center_hz, bandwidth_hz, res_name, T_k, extra_attrs, path):
+        return core.run_s21(self._ctx, _s21_params(
+            config, center_hz, bandwidth_hz, res_name, T_k, extra_attrs), path)
+
+    def noise(self, config, frequency_mode, path, meta_base=None):
+        return core.run_noise(self._ctx, _noise_params(config, frequency_mode), path)
 
 
 # =========================================================================
@@ -1112,6 +1363,9 @@ def cmd_verify(config, args):
 
 def cmd_laser(config, args):
     laser = make_laser_backend(config["backend"], config, LOG)
+    if getattr(laser, "is_null", False):
+        LOG.error("laser_visa_address 为空，激光未连接，'laser' 命令不可用")
+        return 2
     try:
         if args.laser_cmd == "set":
             laser.set_wavelength(config["laser_wavelength_nm"])
@@ -1184,6 +1438,8 @@ def cmd_scan(config, args):
         laser.set_wavelength(config["laser_wavelength_nm"])
 
         actual_T = float(temp.get_temperature(config["lakeshore_channel"]))
+        if getattr(temp, "is_fixed", False):
+            LOG.info("无温控（FixedTemperature），按固定温度 %.2f K 扫描", actual_T)
         target_k = float(args.target_k) if args.target_k is not None else actual_T
         power_mw = float(args.power_mw) if args.power_mw is not None \
             else float(config["laser_power_mw"][0])
@@ -1213,8 +1469,8 @@ def cmd_scan(config, args):
             if stop_event.is_set():
                 break
             res = {"name": res_name}
-            run_one_point(config, ctx, source, laser, None, checkpoint, stop_event,
-                          target_k, actual_T, res, 0, power_mw, save_root,
+            run_one_point(config, CoreMeasure(ctx), source, laser, None, checkpoint,
+                          stop_event, target_k, actual_T, res, 0, power_mw, save_root,
                           args.force, args.skip_noise, mock_instruments, LOG,
                           f_ref_override=f * 1e9)
         return 0
@@ -1235,6 +1491,9 @@ def cmd_scan(config, args):
 def cmd_temp(config, args):
     if args.temp_cmd == "read":
         temp = make_temperature_backend(config["backend"], config, LOG)
+        if getattr(temp, "is_fixed", False):
+            LOG.error("lakeshore_visa_address 为空，温控未连接，'temp read' 不可用")
+            return 2
         try:
             T = temp.get_temperature(config["lakeshore_channel"])
             LOG.info("当前温度 %s = %.4f K (setpoint %.4f K)",
@@ -1258,11 +1517,17 @@ def cmd_temp(config, args):
 
         T = float(args.target_k)
         LOG.info("=== 温度 %.2f K ===", T)
-        temp.set_temperature(T)
-        actual_T, stable = wait_for_stability(
-            temp, T, config["stability_tolerance_k"],
-            config["stability_hold_s"], config["stability_poll_s"],
-            config["stability_max_wait_s"], config["lakeshore_channel"], LOG)
+        if getattr(temp, "is_fixed", False):
+            actual_T = float(config.get("fixed_temperature_k", T))
+            stable = True
+            LOG.info("无温控（FixedTemperature），跳过 set_temperature/wait_for_stability，"
+                     "按固定温度 %.2f K", actual_T)
+        else:
+            temp.set_temperature(T)
+            actual_T, stable = wait_for_stability(
+                temp, T, config["stability_tolerance_k"],
+                config["stability_hold_s"], config["stability_poll_s"],
+                config["stability_max_wait_s"], config["lakeshore_channel"], LOG)
         checkpoint.mark_temperature(T, actual_T, stable)
         if not stable:
             LOG.error("T=%.2f K 未稳定（实际 %.4f K）", T, actual_T)
@@ -1280,9 +1545,9 @@ def cmd_temp(config, args):
             for power_mw in powers:
                 if stop_event.is_set():
                     break
-                run_one_point(config, ctx, source, laser, table, checkpoint,
-                              stop_event, T, actual_T, res, res_idx, power_mw,
-                              save_root, args.force, args.skip_noise,
+                run_one_point(config, CoreMeasure(ctx), source, laser, table,
+                              checkpoint, stop_event, T, actual_T, res, res_idx,
+                              power_mw, save_root, args.force, args.skip_noise,
                               mock_instruments, LOG)
         laser.set_power(0)
         LOG.info("=== 温度 %.2f K 完成，激光关闭 ===", T)
@@ -1303,6 +1568,9 @@ def cmd_temp(config, args):
 
 def _verify_lakeshore(config):
     temp = make_temperature_backend(config["backend"], config, LOG)
+    if getattr(temp, "is_fixed", False):
+        LOG.error("温控未连接（lakeshore_visa_address 为空），请先接 LakeShore 335 再验证")
+        return 2
     try:
         T = temp.get_temperature(config["lakeshore_channel"])
         LOG.info("== 温控验证: identity=%s", getattr(temp, "identity", "n/a"))
@@ -1321,6 +1589,9 @@ def _verify_lakeshore(config):
 
 def _verify_laser(config):
     laser = make_laser_backend(config["backend"], config, LOG)
+    if getattr(laser, "is_null", False):
+        LOG.error("激光未连接（laser_visa_address 为空），请先接 N7779C 再验证")
+        return 2
     try:
         laser.set_wavelength(config["laser_wavelength_nm"])
         laser.set_power(0.5)

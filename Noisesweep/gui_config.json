@@ -1,0 +1,118 @@
+{
+  "backend": "mock",
+  "autosweep_dir": "C:/Windows/System32/YBCO-TA-3.0/Auto_Sweep",
+  "tracking_file": "C:/Windows/System32/YBCO-TA-3.0/Data_process/resonance_table.txt",
+  "data_process_dir": "C:/Windows/System32/YBCO-TA-3.0/Data_process",
+  "data_directory": "C:/Users/smlab/Desktop/TeSIA_Project/Python control/data_aquisition/KID_measurement_v3_package 23/KID_measurement_v3_package/data",
+  "save_root": "C:/Users/smlab/Desktop/TeSIA_Project/Python control/data_aquisition/KID_measurement_v3_package 23/KID_measurement_v3_package/data/S21",
+  "iq_calibration_file": "C:/Users/smlab/Desktop/TeSIA_Project/Python control/data_aquisition/KID_measurement_v3_package 23/KID_measurement_v3_package/data/IQ_calibration/IQ_scan_summary-20260817-153944.txt",
+  "experiment_name": "",
+  "checkpoint_path": null,
+  "log_file": null,
+  "use_chip_library": true,
+  "chip_id": "YBCO#1145",
+  "chip_run_id": "20260609-0624__6-80K__full",
+  "temperature_list_k": [
+    77.0
+  ],
+  "fixed_temperature_k": 77.0,
+  "stability_tolerance_k": 0.05,
+  "stability_hold_s": 60.0,
+  "stability_poll_s": 5.0,
+  "stability_max_wait_s": 1800.0,
+  "abort_on_unstable": false,
+  "lakeshore_channel": "A",
+  "lakeshore_heater_range": null,
+  "lakeshore_pid": null,
+  "drive_temperature": false,
+  "read_actual_temperature": false,
+  "laser_wavelength_nm": 1550.0,
+  "laser_power_mw": [
+    0.0
+  ],
+  "laser_settle_s": 2.0,
+  "predict_laser_shift": true,
+  "resonators": [
+    {
+      "name": "res1",
+      "reference_frequency_hz": null
+    },
+    {
+      "name": "res2",
+      "reference_frequency_hz": null
+    },
+    {
+      "name": "res3",
+      "reference_frequency_hz": null
+    },
+    {
+      "name": "res4",
+      "reference_frequency_hz": null
+    },
+    {
+      "name": "res5",
+      "reference_frequency_hz": null
+    }
+  ],
+  "wide_bandwidth_mode": "fixed",
+  "wide_bandwidth_mhz": 150.0,
+  "wide_bandwidth_mhz_by_temperature": [
+    [
+      4.0,
+      50.0
+    ],
+    [
+      77.0,
+      200.0
+    ]
+  ],
+  "wide_bandwidth_interpolation": "linear",
+  "wide_bandwidth_formula": null,
+  "fine_bandwidth_mhz_by_temperature": [
+    [
+      4.0,
+      15.0
+    ],
+    [
+      20.0,
+      20.0
+    ],
+    [
+      40.0,
+      20.0
+    ],
+    [
+      77.0,
+      25.0
+    ]
+  ],
+  "fine_bandwidth_interpolation": "step",
+  "s21_points": 101,
+  "samples_per_point": 1000,
+  "settle_s": 0.01,
+  "readout_power_dbm": -30.0,
+  "scraps_readout_power_dbm": -60.0,
+  "noise_frequency_mode": "F0_PLUS_DF",
+  "noise_duration_s": 10.0,
+  "noise_block_samples": 10000,
+  "welch_window": "hamming",
+  "welch_segment_seconds": 1.0,
+  "pxie_device_name": "PXI2Slot2",
+  "channels": [
+    0,
+    1
+  ],
+  "i_channel": 0,
+  "q_channel": 1,
+  "sample_rate": 1000000.0,
+  "voltage_range": 1.0,
+  "coupling": "DC",
+  "trigger_mode": "IMMEDIATE",
+  "trigger_source": null,
+  "trigger_edge": "RISING",
+  "e8257d_visa_address": "GPIB1::19::INSTR",
+  "lakeshore_visa_address": "mock:ASRL4",
+  "laser_visa_address": "mock:TCPIP",
+  "save_figures": true,
+  "skip_noise": false
+}

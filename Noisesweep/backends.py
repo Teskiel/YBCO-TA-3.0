@@ -37,6 +37,94 @@ class LaserBackend(Protocol):
 
 
 # =========================================================================
+# 无硬件后端（激光/温控可选）：地址为空时工厂返回这些 no-op 实例
+# =========================================================================
+
+
+class NullLaser:
+    """无激光硬件时的 no-op 后端。laser_visa_address 为空时由工厂返回。
+
+    标记属性 is_null=True，noisesweep.py 用 getattr(laser, "is_null", False) 判别，
+    避免对未连接的激光器产生"假成功"。
+    """
+
+    is_null = True
+    resource_address = None
+    connected = True
+
+    def set_power(self, power_mw: float) -> bool:
+        return True
+
+    def set_power_mw(self, power_mw: float) -> bool:
+        return True
+
+    def set_wavelength(self, wavelength_nm: float) -> bool:
+        return True
+
+    def output_on(self) -> None:
+        pass
+
+    def output_off(self) -> None:
+        pass
+
+    def connect(self) -> bool:
+        return True
+
+    def is_connected(self) -> bool:
+        return True
+
+    def get_power(self) -> float:
+        return 0.0
+
+    def get_status(self) -> dict:
+        return {}
+
+    def close(self) -> None:
+        pass
+
+
+class FixedTemperature:
+    """无温控硬件时的固定温度后端。lakeshore_visa_address 为空时由工厂返回。
+
+    标记属性 is_fixed=True；get_temperature 恒返回固定值。noisesweep.py 用
+    getattr(temp, "is_fixed", False) 判别，并在编排层跳过 set_temperature /
+    wait_for_stability。
+    """
+
+    is_fixed = True
+    identity = "FixedTemperature(no hardware)"
+
+    def __init__(self, fixed_k, log=None):
+        self._fixed_k = float(fixed_k)
+        if log is not None:
+            log.warning("[backend] 无温控，使用 FixedTemperature(%.2f K)", self._fixed_k)
+
+    def get_temperature(self, channel: str = "A") -> float:
+        return self._fixed_k
+
+    def get_setpoint(self, loop: int = 1) -> float:
+        return self._fixed_k
+
+    def set_temperature(self, setpoint_k: float, loop: int = 1) -> None:
+        pass
+
+    def set_heater_range(self, loop: int, heater_range: int) -> None:
+        pass
+
+    def get_heater_percent(self, loop: int = 1) -> float:
+        return 0.0
+
+    def set_pid(self, loop: int, p: float, i: float, d: float) -> None:
+        pass
+
+    def all_heaters_off(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+# =========================================================================
 # 工厂
 # =========================================================================
 
@@ -79,14 +167,17 @@ def make_temperature_backend(kind: str, config: dict, log=None):
             log.info("[backend=mock] 温控使用 FakeLakeShore335")
         return backend
 
+    # 无硬件路径：地址为空 → 固定温度后端（提前于真驱动 import，不依赖 Auto_Sweep）
+    if not address:
+        return FixedTemperature(
+            float(config.get("fixed_temperature_k", 77.0)), log=log)
+
     if kind == "standalone":
         from lakeshore335_control import LakeShore335
     else:
         lakeshore_control, _ = _import_autosweep_drivers(config["autosweep_dir"])
         LakeShore335 = lakeshore_control.LakeShore335
 
-    if not address:
-        raise ValueError("config 缺少 lakeshore_visa_address")
     try:
         backend = LakeShore335(address)
     except Exception as exc:
@@ -111,14 +202,18 @@ def make_laser_backend(kind: str, config: dict, log=None):
             log.info("[backend=mock] 激光使用 FakeLaser")
         return backend
 
+    # 无硬件路径：地址为空 → NullLaser no-op 后端
+    if not address:
+        if log:
+            log.warning("[backend=%s] laser_visa_address 为空 → 使用 NullLaser（跳过激光控制）", kind)
+        return NullLaser()
+
     if kind == "standalone":
         from laser_control import LaserController
     else:
         _, laser_driver = _import_autosweep_drivers(config["autosweep_dir"])
         LaserController = laser_driver.LaserController
 
-    if not address:
-        raise ValueError("config 缺少 laser_visa_address")
     backend = LaserController(address)
     if not backend.connect_with_retry(max_attempts=3, base_delay_s=2.0):
         raise RuntimeError("激光器连接失败: {}".format(address))

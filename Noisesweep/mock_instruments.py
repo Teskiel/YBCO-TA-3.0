@@ -185,24 +185,23 @@ class FakePXIe4480:
         trigger_mode: str = "IMMEDIATE", trigger_source: Optional[str] = None,
         trigger_edge: str = "RISING", read_timeout: float = 10.0,
     ) -> Iterator[FakeAcquisitionResult]:
-        """产固定数量的共振点噪声块；块间相位加随机游走以锻炼 unwrap。"""
+        """产固定数量的共振点噪声块；噪声为偏置点（=S21(freq)，即画布上的
+        noise test point）附近的小幅高斯扰动（σ 与 _synthesize_point 一致），
+        模拟真实测量的"小簇贴近 test point"形态。
+
+        注：旧实现让噪声绕圆心随机游走（σ=0.5 rad/点），归一化后必然画整圆、
+        相位缠绕、低频 PSD 巨大——与真实噪声形态完全不符，且会误导基于 mock
+        的验证（dry-run 检查若只看文件结构则永远"通过"）。
+        """
         self._stop.clear()
         block = int(samples_per_read)
         total = 0
-        phase = float(_RNG.uniform(-np.pi, np.pi))
         freq = self.source.current_frequency_hz
         s = complex(scraps_cmplx_s21(np.asarray([freq]), get_resonance_position())[0])
-        center = complex(0.6, 0.0)  # 与 SCRAPS 拟合出的圆心一致（见 dry-run 输出）
         while not self._stop.is_set():
             self.continuous_blocks += 1
-            # 相位随机游走 + 幅值噪声，绕圆心旋转
-            phase_walk = _RNG.normal(0.0, 0.5, block)
-            theta = phase + np.cumsum(phase_walk)
-            phase = theta[-1]
-            radius = np.abs(s - center)
-            d = center + radius * np.exp(1j * theta)
-            i = np.real(d) + _RNG.normal(0.0, RESONANCE_NOISE_SIGMA, block)
-            q = np.imag(d) + _RNG.normal(0.0, RESONANCE_NOISE_SIGMA, block)
+            i = np.full(block, s.real) + _RNG.normal(0.0, RESONANCE_NOISE_SIGMA, block)
+            q = np.full(block, s.imag) + _RNG.normal(0.0, RESONANCE_NOISE_SIGMA, block)
             result = FakeAcquisitionResult(
                 np.vstack((i, q)), self.channels, self.sample_rate, self.sample_rate
             )
@@ -217,6 +216,8 @@ class FakePXIe4480:
 
 class FakeLakeShore335:
     """温度控制器假体：指数逼近 setpoint，使稳定判据快速通过。"""
+
+    is_fixed = True   # mock 视为未连接 → 手动温度模式（目标即实测，不读假传感器）
 
     def __init__(self, visa_address: str = "mock:ASRL4", start_k: float = 77.0):
         self.visa_address = visa_address
