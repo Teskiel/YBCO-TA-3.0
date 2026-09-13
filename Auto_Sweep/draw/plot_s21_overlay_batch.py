@@ -6,7 +6,9 @@
 Savitzky-Golay 平滑，Red->Orange->Yellow->Green->Purple 五段色谱。
 
 f0 定位: _tracking_utils.py 的 scraps 骨架外推 + P90 基线矫正 + 双验证。
-输出: D:/YBCO/VNAMeas/Data_process/output/_vna_2dBm_step_analysis/s21_overlay/
+
+输出目录: 环境变量 YBCO_DRAW_OUTPUT_BASE/s21_overlay/，
+          缺省落在 <仓库>/Auto_Sweep/draw/output/_vna_2dBm_step_analysis/s21_overlay/
 
 用法:
     python draw/plot_s21_overlay_batch.py
@@ -45,7 +47,13 @@ SG_WINDOW_LENGTH = 101
 SG_POLYORDER = 3
 
 # 输出
-_OUTPUT_BASE = "D:\\YBCO\\VNAMeas\\Data_process\\output\\_vna_2dBm_step_analysis"
+# 输出根目录：环境变量 YBCO_DRAW_OUTPUT_BASE 优先，否则用仓库内相对路径。
+# 历史上这里是旧机器的绝对路径 D:\YBCO\VNAMeas\Data_process\output\...，
+# 提交进库后换机器即写到不存在的位置。详见 docs/multi-machine.md。
+_DEFAULT_OUTPUT_BASE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "draw", "output", "_vna_2dBm_step_analysis")
+_OUTPUT_BASE = os.environ.get("YBCO_DRAW_OUTPUT_BASE", _DEFAULT_OUTPUT_BASE)
 OUTPUT_DIR = os.path.join(_OUTPUT_BASE, "s21_overlay")
 SHOW_PLOTS = False
 SAVE_FIGURES = True

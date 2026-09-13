@@ -37,3 +37,16 @@ Thumbs.db
 
 # ===== 个人 GUI 运行时状态（不入库）=====
 Noisesweep/gui_user_settings.json
+
+# ===== 机器专属配置（不入库）=====
+# 约定：X.json 是入库的基准/示例，X.machine.json 是本机真实值。
+# 记的是这台电脑的路径与仪器地址——写进版本历史既没用又会泄露环境信息。
+machines/machines.local.json
+**/*.machine.json
+!**/*.machine.example.json
+
+# ===== 本地临时目录（自检脚本 / 沙箱 / pytest）=====
+# 受限沙箱下这些目录可能删不掉（WinError 5），因此显式忽略，避免污染 git status。
+.tmp_synctest/
+.tmp_pytest/
+pytest-cache-files-*/

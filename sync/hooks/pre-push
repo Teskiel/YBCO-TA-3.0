@@ -1,0 +1,28 @@
+#!/bin/sh
+# YBCO-TA-3.0 pre-push 门禁（由 sync/install_hooks.py 安装）
+#
+# 本文件是薄壳：真正的逻辑在 sync/pre_push.py，方便跨平台与单测。
+# 退出码 1 会让 git 中止 push。
+#
+# 逃生阀：YBCO_SKIP_HOOKS=1 git push
+set -u
+
+PY=""
+for cand in python python3 py; do
+    if command -v "$cand" >/dev/null 2>&1; then
+        if [ "$cand" = "py" ]; then
+            if py -3 -c "" >/dev/null 2>&1; then PY="py -3"; break; fi
+        else
+            if "$cand" -c "" >/dev/null 2>&1; then PY="$cand"; break; fi
+        fi
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "pre-push: 找不到可用的 python，跳过同步检查。" >&2
+    echo "          修复：让 python 进入 PATH，或重跑 python sync/install_hooks.py install" >&2
+    exit 0
+fi
+
+# shellcheck disable=SC2086
+exec $PY "$(git rev-parse --show-toplevel)/sync/pre_push.py"

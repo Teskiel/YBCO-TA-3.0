@@ -539,12 +539,22 @@ def plot_qi_vs_temperature(results, all_pv, r_names, output_dir,
 # CLI
 # ═══════════════════════════════════════════════════════════
 
+# 缓存根目录：环境变量 YBCO_DRAW_CACHE_ROOT 优先，否则取仓库内相对路径。
+# 历史上下面的路径写死成旧机器的绝对路径（旧机器目录），换机器即
+# 失效，且仓库是 PUBLIC，等于公开那台机器的目录结构。
+# 详见 docs/multi-machine.md §5。机器专属根目录请设 YBCO_DRAW_CACHE_ROOT。
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+from _paths import cache_root as _cache_root
+_CACHE_ROOT = str(_cache_root()).replace("\\", "/").rstrip("/")
+
 DEFAULT_DATA_DIR = (
-    "D:/YBCO/VNAMeas/Auto_Sweep/experiment_data/~merged/"
+    "" + _CACHE_ROOT + "/"
     "20260605-0606__6-90K__774pts"
 )
 DEFAULT_OUTPUT_DIR = (
-    "D:/YBCO/VNAMeas/Auto_Sweep/experiment_data/~merged/output/"
+    "" + _CACHE_ROOT + "/output/"
 )
 
 

@@ -1,0 +1,28 @@
+#!/bin/sh
+# YBCO-TA-3.0 commit-msg：校验 Machine: trailer 是否齐全
+# （由 sync/install_hooks.py 安装）
+#
+# 参数：$1 = 消息文件路径。退出码 1 会让 git 中止本次提交。
+#
+# 逃生阀：YBCO_SKIP_HOOKS=1 git commit ...
+set -u
+
+PY=""
+for cand in python python3 py; do
+    if command -v "$cand" >/dev/null 2>&1; then
+        if [ "$cand" = "py" ]; then
+            if py -3 -c "" >/dev/null 2>&1; then PY="py -3"; break; fi
+        else
+            if "$cand" -c "" >/dev/null 2>&1; then PY="$cand"; break; fi
+        fi
+    fi
+done
+
+if [ -z "$PY" ]; then
+    echo "commit-msg: 找不到可用的 python，跳过机器标识校验。" >&2
+    echo "           修复：重跑 python sync/install_hooks.py install" >&2
+    exit 0
+fi
+
+# shellcheck disable=SC2086
+exec $PY "$(git rev-parse --show-toplevel)/sync/trailer.py" --check "$1"

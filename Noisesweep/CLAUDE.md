@@ -6,13 +6,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 KID（Kinetic Inductance Detector，动态电感探测器）低温测量系统的 PyQt5 桌面程序，控制三台仪器完成 IQ 校准、S21 谐振器扫描和噪声采集。项目为**单文件扁平结构，没有包、没有构建系统、没有测试**——所有 `.py` 文件必须放在同一目录下，靠直接 `import` 模块名相互引用。
 
-运行入口是 `kid_measurement_gui_v3.py`，从项目目录启动：
+运行入口是 `kid_measurement_gui_personal.py`（6-Tab 个人测量 GUI），从项目目录启动：
 
 ```bash
-python kid_measurement_gui_v3.py
+python kid_measurement_gui_personal.py
 ```
 
-启动时会自动创建 `data/IQ_calibration/`、`data/S21/`、`data/noise/` 三个默认保存目录（相对脚本所在目录）。Python 版本为 3.14（见 `__pycache__/cpython-314`）。
+无 GUI 的 CLI 编排器入口是 `orchestrator_noisesweep.py`（子命令式）：
+
+```bash
+python orchestrator_noisesweep.py --config noisesweep_config.json run
+python orchestrator_noisesweep.py --config _dryrun_config.json --dry-run scan 4.5
+```
+
+> **3.1 起已移除**：旧浏览器 Dashboard（`noisesweep_dashboard.py`）、旧 PyQt 4-Tab
+> 界面（`kid_measurement_gui_v3.py`）、旧 CLI（`noisesweep.py`）。分别由
+> 上面的个人 GUI 与 orchestrator 取代。本文件若提及这三个旧名字，只在
+> "已移除"的语境下有效。
+
+启动时会自动创建 `data/IQ_calibration/`、`data/S21/`、`data/noise/` 三个默认保存目录（相对脚本所在目录）。
+
+## 配置分层（多机协作）
+
+`gui_config.json` 是**入库的基准值**，只放相对仓库推导的路径；本机真实路径与
+仪器地址写在 `gui_config.machine.json`（**不入库**）。加载顺序：
+`YBCO_GUI_CONFIG` 环境变量 → `gui_config.machine.json` → `gui_config.json` →
+代码内 `SEED`。任一层缺失都不报错，只回退。
+
+完整规范见 [`../docs/multi-machine.md`](../docs/multi-machine.md) §5——
+**机器专属路径不要写回入库文件**。
 
 ## 依赖
 
@@ -39,13 +61,13 @@ PyQt5  matplotlib  numpy  h5py  pyvisa  nidaqmx  scipy
 
 - `IQ_calibration.py` — `IQEllipseCalibrator`（椭圆拟合，MATLAB 移植）+ `IQCalibrationTable`（频率相关校准参数插值/外推）。
 - `S21_fitting.py` — `ScrapsS21Fitter`（scraps+lmfit 拟合）、`S21NoiseCalibration`（噪声 IQ→幅度/相位换算）、`welch_psd`。
-- `plot_S21_hdf5.py` — 独立脚本，读 S21 HDF5 并绘图（顶部 `FILE_PATH` 需手动改）。
+- `plot_S21_hdf5.py` — 独立脚本，读 S21 HDF5 并绘图。文件路径走命令行参数或环境变量 `YBCO_S21_HDF5`（不再需要改脚本源码）。
 
 ## 架构：共享会话与线程模型
 
 这是理解本代码库的核心，需要跨文件才能看清：
 
-1. **`InstrumentManager`（`kid_measurement_gui_v3.py`）是唯一的仪器会话持有者。** 全局只存在一个 E8257D 实例（`manager.source`）、一个 P5002A 实例（`manager.p5002_window.vna`）和一份 PXIe 配置字典 `manager.daq_config`（device_name/channels/sample_rate/voltage_range/coupling/trigger_*）。所有测量 Tab 通过 `self.manager` 共享它们。
+1. **`InstrumentManager`（`kid_measurement_gui_personal.py`）是唯一的仪器会话持有者。** 全局只存在一个 E8257D 实例（`manager.source`）、一个 P5002A 实例（`manager.p5002_window.vna`）和一份 PXIe 配置字典 `manager.daq_config`（device_name/channels/sample_rate/voltage_range/coupling/trigger_*）。所有测量 Tab 通过 `self.manager` 共享它们。
 
 2. **线程安全用 `RLock` 实现**：`manager.source_lock`、`manager.p5002_lock`、`manager.daq_lock`。任何在 worker 线程里读写对应仪器的代码块必须先持有锁。
 

@@ -1,6 +1,14 @@
 {
+  "_readme": [
+    "app_settings 的本机无关模板。真实设置写在同目录的 app_settings.machine.json（不入库）。",
+    "加载优先级：环境变量 YBCO_APP_SETTINGS → app_settings.machine.json → 本模板/历史 app_settings.json。",
+    "地址属于机器专属信息；实验方法参数（vna/laser/lakeshore/temperature_sweep）跨机共享。",
+    "详见 docs/multi-machine.md 与 Auto_Sweep/app_settings.py。"
+  ],
   "addresses": {
-    "_note": "机器专属内容已移到 app_settings.machine.json（不入库）。本文件保留占位以兼容旧读取路径。"
+    "laser": "<本机 laser 的 VISA 地址>",
+    "lakeshore": "<本机 lakeshore 的 VISA 地址>",
+    "vna": "<本机 vna 的 VISA 地址>"
   },
   "laser": {
     "wavelength_nm": 1550.0,

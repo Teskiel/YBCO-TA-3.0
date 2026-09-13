@@ -1,16 +1,23 @@
 # -*- coding: utf-8 -*-
 """GUI 配置加载 / 合并 / 持久化（Qt-free）。
 
-gui_config.json 是基准配置（seed 自 Noisesweep 的 noisesweep_config.json，
-并修正为绝对路径）。collect_config() 在运行时把 V3 面板控件值 + 自动化 Tab
-控件值合并进来，得到可直接喂给 orchestrator_noisesweep.run_one_point 的
-config dict。
+配置分三层（详见 docs/multi-machine.md 与 sync/machine_config.py）
+----------------------------------------------------------------
+    gui_config.json                  入库   基准值，**对任意机器都成立**
+    gui_config.machine.json          不入库 本机真实路径（.gitignore 已排除）
+    YBCO_GUI_CONFIG                  环境变量 临时/CI 覆盖，最高优先级
 
-关键路径必须写绝对路径（相对默认会因 __file__ 位置漂移而失效）：
-  - data_directory  : 原 KID v3 包的 data 目录（新 GUI 不复制数据，只引用）
-  - save_root       : 自动化测量的保存根目录（默认 = data_directory/S21）
-  - data_process_dir: YBCO-TA-3.0/Data_process（芯片标定库 + 追踪表）
-  - autosweep_dir   : YBCO-TA-3.0/Auto_Sweep（lakeshore_control/laser_driver）
+历史上本文件把实验机的绝对路径（他人用户目录、以及一个需要管理员权限的
+部署位置）硬编码成了模块常量并提交进库，导致换台电脑直接跑不起来，
+而仓库是 PUBLIC。现在那些值必须放在 `gui_config.machine.json` 里；
+基准文件只放**相对仓库**的路径与占位值。
+
+注意 `data_directory` / `save_root` / `iq_calibration_file` 指向的是仓库**外部**
+的原 KID v3 数据包，没有合理的仓库内默认值——基准里留空，由本机覆盖文件提供。
+留空时 GUI 仍能启动，只是保存路径需要在"自动化测量流程"页手工选。
+
+collect_config() 在运行时把 V3 面板控件值 + 自动化 Tab 控件值合并进来，得到
+可直接喂给 orchestrator_noisesweep.run_one_point 的 config dict。
 """
 
 import json
@@ -19,20 +26,37 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+# 让扁平结构的 Noisesweep 也能 import 仓库级的配置分层加载器。
+# 与 Data_process/pipeline.py 用 sys.path.insert 引用 _lib 是同一套路。
+_REPO_ROOT = SCRIPT_DIR.parent
+if str(_REPO_ROOT / "sync") not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT / "sync"))
+
+import machine_config  # noqa: E402  (路径注入后才能 import)
+
+#: 基准配置（入库）。机器专属值请写 DEFAULT_CONFIG_PATH 的 .machine.json 兄弟文件。
 DEFAULT_CONFIG_PATH = SCRIPT_DIR / "gui_config.json"
+
+#: 本机覆盖文件（不入库）。save_gui_config 也写这里，避免污染基准文件。
+MACHINE_CONFIG_PATH = machine_config.override_path(DEFAULT_CONFIG_PATH)
+
+#: 环境变量覆盖（最高优先级，值须是 JSON 对象）
+CONFIG_ENV_VAR = "YBCO_GUI_CONFIG"
 
 # 上次使用参数叠加层（与 gui_config.json 默认基线分离）。测试可用环境变量
 # KID_GUI_USER_SETTINGS 指到临时文件，避免污染真实用户设置。
 USER_SETTINGS_PATH = Path(os.environ.get(
     "KID_GUI_USER_SETTINGS", SCRIPT_DIR / "gui_user_settings.json"))
 
-# 原 KID v3 包数据目录（本程序只引用、不复制 23GB 数据）
-KID_V3_DATA_DIR = (
-    r"C:/Users/smlab/Desktop/TeSIA_Project/Python control/data_aquisition/"
-    r"KID_measurement_v3_package 23/KID_measurement_v3_package/data"
-)
-DATA_PROCESS_DIR = r"C:/Windows/System32/YBCO-TA-3.0/Data_process"
-AUTOSWEEP_DIR = r"C:/Windows/System32/YBCO-TA-3.0/Auto_Sweep"
+# ---- 仓库内路径：一律相对本文件推导，因此对每台机器都成立 ----
+DATA_PROCESS_DIR = (_REPO_ROOT / "Data_process").as_posix()
+AUTOSWEEP_DIR = (_REPO_ROOT / "Auto_Sweep").as_posix()
+
+# ---- 仓库外路径：无合理默认值，留空 → 由机器覆盖文件填空 ----
+# 原 KID v3 包数据目录（本程序只引用、不复制其数据）。
+# 保留这个模块级名字是为了向后兼容；需要真值时请读 load_gui_config()。
+KID_V3_DATA_DIR = ""
 
 SEED = {
     # ---- 后端 / 路径 ----
@@ -41,10 +65,8 @@ SEED = {
     "tracking_file": (Path(DATA_PROCESS_DIR) / "resonance_table.txt").as_posix(),
     "data_process_dir": DATA_PROCESS_DIR,
     "data_directory": KID_V3_DATA_DIR,
-    "save_root": (Path(KID_V3_DATA_DIR) / "S21").as_posix(),
-    "iq_calibration_file": (
-        Path(KID_V3_DATA_DIR) / "IQ_calibration" / "IQ_scan_summary-20260817-153944.txt"
-    ).as_posix(),
+    "save_root": "",
+    "iq_calibration_file": "",
     "experiment_name": "",
     "checkpoint_path": None,
     "log_file": None,
@@ -140,20 +162,33 @@ def _load_json_optional(path):
 
 
 def load_gui_config(path=None):
-    """读 gui_config.json；文件缺失时用 SEED 写回并返回 SEED。"""
-    p = Path(path) if path else DEFAULT_CONFIG_PATH
-    data = _load_json_optional(p)
-    if data is None:
-        data = dict(SEED)
-        save_gui_config(data, p)
-    return data
+    """按 环境变量 → gui_config.machine.json → gui_config.json → SEED 读出配置。
+
+    传入 path 时只读那一个文件（测试与显式指定用），不走分层。
+    任何一层缺失都**不抛异常**——离线自检链路必须在全新 clone 上就能跑通。
+    """
+    if path is not None:
+        data = _load_json_optional(Path(path))
+        return data if isinstance(data, dict) else dict(SEED)
+
+    merged = machine_config.load_layered_config(
+        DEFAULT_CONFIG_PATH, CONFIG_ENV_VAR, quiet=True)
+    # 补上基准里没有的键（基准文件可能是旧版本留下的，缺新字段）
+    out = dict(SEED)
+    out.update(merged)
+    return out
 
 
 def save_gui_config(config, path=None):
-    """把需持久化的 GUI 设置写回 gui_config.json（UTF-8）。"""
-    p = Path(path) if path else DEFAULT_CONFIG_PATH
+    """把需持久化的 GUI 设置写回（UTF-8）。
+
+    默认写**本机覆盖文件** gui_config.machine.json，而不是入库的基准文件：
+    GUI 里"保存当前设置为默认"记录的是这台电脑的路径与仪器地址，
+    写进基准文件会把它变成机器专属内容并污染 git 工作区。
+    """
+    p = Path(path) if path else MACHINE_CONFIG_PATH
     p.write_text(
-        json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def load_user_settings(path=None):

@@ -1,0 +1,26 @@
+#!/bin/sh
+# YBCO-TA-3.0 prepare-commit-msg：自动补 Machine: trailer
+# （由 sync/install_hooks.py 安装）
+#
+# 参数：$1 = 消息文件路径, $2 = source（message/template/merge/squash/commit）
+# 这里吞掉退出码：prepare 阶段失败不该阻断提交，真正的把关在 commit-msg。
+set -u
+
+PY=""
+for cand in python python3 py; do
+    if command -v "$cand" >/dev/null 2>&1; then
+        if [ "$cand" = "py" ]; then
+            if py -3 -c "" >/dev/null 2>&1; then PY="py -3"; break; fi
+        else
+            if "$cand" -c "" >/dev/null 2>&1; then PY="$cand"; break; fi
+        fi
+    fi
+done
+
+if [ -z "$PY" ]; then
+    exit 0
+fi
+
+# shellcheck disable=SC2086
+$PY "$(git rev-parse --show-toplevel)/sync/trailer.py" --file "$1" --source "${2:-}" 2>&1 || true
+exit 0

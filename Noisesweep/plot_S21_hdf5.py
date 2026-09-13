@@ -1,5 +1,6 @@
 """Read a KID S21 HDF5 file and plot all available S21-related data."""
 
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -9,9 +10,13 @@ import numpy as np
 
 
 # ============================================================================
-# 只需要修改这里的HDF5文件地址，然后直接运行本脚本
+# HDF5 文件地址：优先读环境变量 YBCO_S21_HDF5，否则用下面的默认值。
+#
+# 历史问题：这里曾硬编码成某台电脑的桌面路径（实验机的用户目录），提交进库后
+# 换机器即失效，且仓库是 PUBLIC，等于把他人机器的目录结构公开。机器专属路径
+# 请走环境变量，或按 docs/multi-machine.md 的 *.machine.json 分层约定放置。
 # ============================================================================
-FILE_PATH = r"C:\Users\smlab\Desktop\S21_measurement.h5"
+FILE_PATH = os.environ.get("YBCO_S21_HDF5", "")
 
 # 是否将图片保存到HDF5文件所在目录；不需要保存时设为 False
 SAVE_FIGURES = False
@@ -248,12 +253,27 @@ def plot_s21_hdf5(file_path, show=True, save_path: Optional[str] = None):
 
 
 if __name__ == "__main__":
-    selected_file = Path(FILE_PATH).expanduser().resolve()
+    import argparse
+
+    _ap = argparse.ArgumentParser(
+        description="读一个 KID S21 HDF5 文件并画出其中所有 S21 相关数据。")
+    _ap.add_argument("hdf5", nargs="?", default=FILE_PATH,
+                     help="HDF5 文件路径（默认取环境变量 YBCO_S21_HDF5）")
+    _args = _ap.parse_args()
+
+    if not _args.hdf5:
+        raise SystemExit(
+            "没有指定 HDF5 文件。二选一：\n"
+            "  python plot_S21_hdf5.py <文件.h5>\n"
+            "  set YBCO_S21_HDF5=<文件.h5>   （PowerShell: "
+            "$env:YBCO_S21_HDF5='<文件.h5>'）\n"
+            "机器专属路径请走环境变量，不要写回本脚本——本仓库是 PUBLIC 且"
+            "代码要在多台电脑间同步。")
+
+    selected_file = Path(_args.hdf5).expanduser().resolve()
     if not selected_file.is_file():
         raise FileNotFoundError(
-            "没有找到HDF5文件，请修改脚本顶部的 FILE_PATH：\n{}".format(
-                selected_file
-            )
+            "没有找到HDF5文件：\n{}".format(selected_file)
         )
 
     output_image = None

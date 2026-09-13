@@ -12,14 +12,22 @@ and persists/restores last-used settings automatically (no manual presets).
 
 import json
 import os
+import sys
 import time
 from typing import Optional
+
+# app_settings 模块在 Auto_Sweep/ 根下，ui/ 是它的子目录——补上路径才能 import。
+# （与 Data_process/pipeline.py 引用 _lib 的 sys.path.insert 是同一套路。）
+_AUTOSWEEP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _AUTOSWEEP_DIR not in sys.path:
+    sys.path.insert(0, _AUTOSWEEP_DIR)
 
 import pyvisa
 
 from PyQt5.QtCore import QThread, QTimer, Qt, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import QMainWindow, QStackedWidget, QMessageBox
 
+import app_settings
 from ui.dashboard_page import DashboardPage
 from ui.laser_page import LaserPage
 from ui.lakeshore_page import LakeShorePage
@@ -27,7 +35,10 @@ from ui.vna_page import VNAPage
 from ui.workers import LaserWorker, LakeShoreWorker, VNAWorker, ExperimentWorker
 
 
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "..", "app_settings.json")
+# 设置写回**机器层**（app_settings.machine.json，不入库），不写 app_settings.json。
+# 入库文件被 GUI 自动保存改写会让工作区长期"有未提交改动"，pre-push 门禁会一直拦。
+# 兼容旧名：历史代码/测试若引用 main_window.SETTINGS_FILE，仍能拿到路径。
+SETTINGS_FILE = str(app_settings.settings_path())
 
 
 def _ts() -> str:
@@ -155,36 +166,38 @@ class MainWindow(QMainWindow):
     def _save_settings(self):
         try:
             data = self._collect_settings()
-            path = os.path.normpath(SETTINGS_FILE)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            self.dashboard.log(_ts() + "Settings auto-saved")
+            app_settings.save_settings(data)
+            self.dashboard.log(_ts() + f"Settings auto-saved → "
+                                      f"{app_settings.settings_path().name}")
         except Exception as e:
             self.dashboard.log(_ts() + f"Settings save failed: {e}")
 
     def _load_settings(self):
         try:
-            path = os.path.normpath(SETTINGS_FILE)
-            if not os.path.exists(path):
+            data = app_settings.load_settings()
+            if not data:
                 self.dashboard.log(_ts() + "No saved settings — using defaults")
                 return
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
 
-            # addresses
+            # addresses —— 机器专属。只在本机层提供了**真实**地址时才套用；
+            # 示例/模板里的占位值（"<...>"）一律忽略，否则会把仪表下拉框
+            # 填成占位字符串，比留空更难排查。
+            _addrs = data.get("addresses") if isinstance(data.get("addresses"), dict) else {}
             for k in ("laser", "lakeshore", "vna"):
-                if "addresses" in data and k in data["addresses"] and data["addresses"][k]:
-                    combo = getattr(self.dashboard, f"_{k}_addr", None)
-                    if combo:
-                        idx = combo.findText(data["addresses"][k])
-                        if idx >= 0:
-                            combo.setCurrentIndex(idx)
-                        else:
-                            combo.setEditText(data["addresses"][k])
+                _addr = _addrs.get(k)
+                if not _addr or str(_addr).startswith("<"):
+                    continue
+                combo = getattr(self.dashboard, f"_{k}_addr", None)
+                if combo:
+                    idx = combo.findText(str(_addr))
+                    if idx >= 0:
+                        combo.setCurrentIndex(idx)
+                    else:
+                        combo.setEditText(str(_addr))
                 # also update detail page address labels
                 page = self._page_for(k)
-                if page and hasattr(page, "set_address") and "addresses" in data:
-                    page.set_address(data["addresses"].get(k, ""))
+                if page and hasattr(page, "set_address"):
+                    page.set_address(str(_addr))
 
             # laser
             if "laser" in data:

@@ -1,0 +1,2 @@
+{"version": "3.0", "tag": "v3.0", "date": "2026-08-23", "machine": "unknown", "machine_ref": "", "commit": "8443181e1bf4b0ab8e96ab951824885c263a1a5f", "commit_short": "8443181", "notes": "三模块整合版首次导入（追溯项：机器归属无证据）"}
+{"version": "3.1", "tag": "v3.1", "date": "2026-08-26", "machine": "lab-smlab", "machine_ref": "", "commit": "666c6580b7fe3d38a5c74c739d69ce7aba5d5342", "commit_short": "666c658", "notes": "6-Tab 个人 GUI + orchestrator 重构 + 移除 dashboard（追溯项：依据为该提交写死的 smlab 路径）"}

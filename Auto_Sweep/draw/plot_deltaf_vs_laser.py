@@ -49,7 +49,13 @@ SG_POLYORDER = 3
 OUTLIER_SIGMA = 2.0
 
 # 输出
-_OUTPUT_BASE = "D:\\YBCO\\VNAMeas\\Data_process\\output\\_vna_2dBm_step_analysis"
+# 输出根目录：环境变量 YBCO_DRAW_OUTPUT_BASE 优先，否则用仓库内相对路径。
+# 历史上这里是旧机器的绝对路径 D:\YBCO\VNAMeas\Data_process\output\...，
+# 提交进库后换机器即写到不存在的位置。详见 docs/multi-machine.md。
+_DEFAULT_OUTPUT_BASE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "draw", "output", "_vna_2dBm_step_analysis")
+_OUTPUT_BASE = os.environ.get("YBCO_DRAW_OUTPUT_BASE", _DEFAULT_OUTPUT_BASE)
 OUTPUT_DIR = os.path.join(_OUTPUT_BASE, "deltaf_vs_laser")
 SHOW_PLOTS = False
 SAVE_FIGURES = True

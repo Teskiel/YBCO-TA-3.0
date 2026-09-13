@@ -1,0 +1,43 @@
+{
+  "_schema": {
+    "version": 1,
+    "id": "机器代号，正则 ^[a-z0-9][a-z0-9-]{1,23}$，一经确定永不复用、永不改名",
+    "role": "dev=开发机 / lab=实验测量机 / archive=归档机",
+    "hostname": "COMPUTERNAME，必须真实填写，sync/setup_machine.py 靠它自动认机",
+    "repo_path": "该机上的仓库绝对路径，仅供人读，不参与任何逻辑",
+    "notes": "自由备注；含 '<待确认>' 的条目表示归属为推定，不是实测"
+  },
+  "_why": "本表是跨机协作的唯一权威机器清单。commit trailer 的 Machine: 值、版本标签的机器归属、sync/check.py 的落后比较目标全部来自这里。",
+  "machines": [
+    {
+      "id": "pc-teski",
+      "label": "个人开发机（本机）",
+      "role": "dev",
+      "hostname": "DESKTOP-FJA4R3U",
+      "os": "Windows",
+      "python": "3.12.10",
+      "repo_path": "D:/code/project/YBCO-TA-3.0",
+      "notes": "旧库 YBCO_TA / scraps / scarp / YBCO-TA-data 均在本机 D:/code/project 下。首次登记于 2026-09-13 的同步整改。"
+    },
+    {
+      "id": "lab-smlab",
+      "label": "实验测量机（smlab）",
+      "role": "lab",
+      "hostname": "",
+      "os": "Windows",
+      "python": "3.14",
+      "repo_path": "C:/Users/smlab/YBCO-TA-3.0",
+      "notes": "原部署在 C:/Windows/System32/YBCO-TA-3.0（需管理员权限且受 UAC 虚拟化影响，建议迁移）。hostname 待该机跑 setup_machine.py 时回填。3.1 版本与 45a6a3c/666c658 由其产出（由 C:/Users/smlab 路径证据反推，置信度中）。"
+    },
+    {
+      "id": "pc-merge",
+      "label": "第二台个人机（待确认）",
+      "role": "dev",
+      "hostname": "",
+      "os": "Windows",
+      "python": "",
+      "repo_path": "",
+      "notes": "<待确认> 45a6a3c（3.1）与 666c658（merge）相隔 2 分钟，疑为独立机器；若确认就是本机或 lab-smlab，请删除本条并把相关提交的 machine 归属改到正确条目。"
+    }
+  ]
+}

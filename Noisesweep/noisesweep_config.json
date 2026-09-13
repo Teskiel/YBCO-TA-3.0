@@ -45,8 +45,8 @@
   "fine_bandwidth_mhz_by_temperature": [[4.0, 15.0], [20.0, 20.0], [40.0, 20.0], [77.0, 25.0]],
   "fine_bandwidth_interpolation": "step",
 
-  "iq_calibration_file": "C:/Users/smlab/Desktop/TeSIA_Project/Python control/data_aquisition/KID_measurement_v3_package 23/KID_measurement_v3_package/data/IQ_calibration/IQ_scan_summary-20260817-153944.txt",
-  "save_root": "C:/Users/smlab/Desktop/TeSIA_Project/Python control/data_aquisition/KID_measurement_v3_package 23/KID_measurement_v3_package/data/S21",
+  "iq_calibration_file": null,
+  "save_root": null,
   "experiment_name": "",
   "checkpoint_path": null,
   "log_file": null,

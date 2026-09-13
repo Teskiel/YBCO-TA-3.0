@@ -13,6 +13,16 @@
 import numpy as np
 from scipy.stats import linregress
 
+# 缓存根目录：环境变量 YBCO_DRAW_CACHE_ROOT 优先，否则取仓库内相对路径。
+# 历史上下方自检块里写死成旧机器的绝对路径（旧机器目录），换机器即
+# 失效，且仓库是 PUBLIC，等于公开那台机器的目录结构。
+# 详见 docs/multi-machine.md §5。
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _paths import cache_root as _cache_root
+_CACHE_ROOT = str(_cache_root()).replace("\\", "/").rstrip("/")
+
 
 # ═══════════════════════════════════════════════════════
 # f0 不确定度 (基于 dip 深度)
@@ -233,7 +243,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     cache_path = Path(
-        "D:/YBCO/VNAMeas/Auto_Sweep/experiment_data/~merged/output/_cache/"
+        _CACHE_ROOT + "/output/_cache/"
         "_cache_20260609-0624__6-80K__full.pkl")
 
     if not cache_path.exists():

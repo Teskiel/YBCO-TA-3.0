@@ -1,0 +1,24 @@
+{
+  "_readme": [
+    "这是 Noisesweep GUI 的本机覆盖文件模板。",
+    "用法：复制为同目录的 gui_config.machine.json（去掉 .example），填入本机真实值。",
+    "  gui_config.machine.json **不入库**（.gitignore 已排除）——它记的是这台电脑的",
+    "  路径与仪器地址，写进版本历史既没用又会泄露环境信息（仓库是 PUBLIC）。",
+    "加载优先级：环境变量 YBCO_GUI_CONFIG → gui_config.machine.json → gui_config.json →",
+    "  代码内 SEED 默认值。任何一层缺失都不会报错，只是回退到更低优先级。",
+    "自动化生成：python sync/setup_machine.py --id <机器代号>",
+    "查看解析结果：python sync/machine_config.py Noisesweep/gui_config.json"
+  ],
+
+  "autosweep_dir": "<本仓库>/Auto_Sweep",
+  "tracking_file": "<本仓库>/Data_process/resonance_table.txt",
+  "data_process_dir": "<本仓库>/Data_process",
+
+  "data_directory": "<原 KID v3 包的 data 目录绝对路径>",
+  "save_root": "<原 KID v3 包的 data/S21 目录绝对路径>",
+  "iq_calibration_file": "<IQ 校准汇总 txt 的绝对路径>",
+
+  "lakeshore_visa_address": "<本机 LakeShore 的 VISA 地址，如 GPIB0::12::INSTR 或 null>",
+  "laser_visa_address": "<本机激光器的 VISA 地址，如 TCPIP0::...::INSTR 或 null>",
+  "e8257d_visa_address": "<本机 E8257D 的 VISA 地址，如 GPIB1::19::INSTR>"
+}

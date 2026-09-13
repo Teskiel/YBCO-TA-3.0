@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
+r"""
 Experiment configuration constants.
 
 All sweep parameters, instrument addresses, PID values, and stability
@@ -10,7 +10,27 @@ Dead code removed from the original power_sweep_auto.py:
   - TRACE_NAME         (declared but never referenced)
   - auto_adjust_pid    (never read by any code path)
   - diagnose_before_measure (never read by any code path)
+
+输出路径约定（多机协作，见 docs/multi-machine.md §5）
+--------------------------------------------------
+路径默认**相对本仓库**推导，因此换台电脑不会写到不存在的位置。
+需要把数据放到别处（例如大容量盘、NAS）时设环境变量，不要改这里的常量：
+
+    YBCO_EXPERIMENT_DATA_DIR=<实验数据根目录>
+    YBCO_CLI_BASE_FOLDER=<CLI runner 的输出目录>
+
+历史问题：这里曾硬编码旧机器的数据盘绝对路径（`D:\\<旧机器>\\VNAMeas\\...`），
+提交进库后换机器即失效，且仓库是 PUBLIC。
 """
+
+import os
+from pathlib import Path
+
+#: 仓库内 Auto_Sweep/ 目录（paths 派生的基准）
+_AUTOSWEEP_DIR = Path(__file__).resolve().parent
+#: 实验数据根（与 ui/workers.py 的 ExperimentWorker 输出目录一致）
+EXPERIMENT_DATA_DIR = Path(os.environ.get(
+    "YBCO_EXPERIMENT_DATA_DIR", _AUTOSWEEP_DIR / "experiment_data"))
 
 # =========================================================================
 # Instrument resource addresses
@@ -25,7 +45,11 @@ resource_lakeshore = "ASRL4::INSTR"
 # =========================================================================
 
 date = "20260529"
-base_folder = rf"D:\YBCO\VNAMeas\data\{date}\-45dBm_temperature_sweep"
+# CLI runner 输出目录。默认落在仓库内，换机器不会写到不存在的位置；
+# 需要放别处请设环境变量 YBCO_CLI_BASE_FOLDER。
+base_folder = os.environ.get(
+    "YBCO_CLI_BASE_FOLDER",
+    str(EXPERIMENT_DATA_DIR / date / "-45dBm_temperature_sweep"))
 
 # =========================================================================
 # Sweep ranges
@@ -189,8 +213,9 @@ laser_first_on_settle_time_s = 60         # 首次上电沉降 (0→非零)
 # 实验数据完整性检查与迁移设置
 # =========================================================================
 
-# 实验数据根目录（与 ui/workers.py ExperimentWorker 的输出路径一致）
-experiment_data_base_dir = r"D:\YBCO\VNAMeas\Auto_Sweep\experiment_data"
+# 实验数据根目录（与 ui/workers.py ExperimentWorker 的输出路径一致）。
+# 可用环境变量 YBCO_EXPERIMENT_DATA_DIR 覆盖（见文件头说明）。
+experiment_data_base_dir = str(EXPERIMENT_DATA_DIR)
 
 # 已完成实验迁移目标子文件夹名称（在 experiment_data_base_dir 下创建）
 accomplish_subfolder_name = "accomplish"

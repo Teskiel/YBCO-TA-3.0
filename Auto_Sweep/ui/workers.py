@@ -13,8 +13,16 @@ from dataclasses import dataclass
 from typing import Optional
 import json
 import os
+import sys
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
+
+# app_settings 模块在 Auto_Sweep/ 根下（ui/ 是子目录）；补路径以便 import。
+_AUTOSWEEP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _AUTOSWEEP_DIR not in sys.path:
+    sys.path.insert(0, _AUTOSWEEP_DIR)
+
+import app_settings
 
 from memory_monitor import MemoryMonitor
 
@@ -791,25 +799,22 @@ class CheckpointManager:
 def _save_overshoot_learning_incremental(learning: dict,
                                          caller_file: str,
                                          log_fn=None) -> None:
-    """增量保存 overshoot 学习数据到 app_settings.json（原子写入）。"""
+    """增量保存 overshoot 学习数据到**机器层**设置文件（原子写入）。
+
+    写 app_settings.machine.json（不入库），不写 app_settings.json：
+    后者是入库文件，被自动保存改写会长期污染工作区。
+    """
     if not learning:
         return
     try:
-        import json as _json
-        import os as _os
-        _settings_path = _os.path.join(
-            _os.path.dirname(_os.path.dirname(caller_file)),
-            "app_settings.json")
-        _settings = {}
-        if _os.path.exists(_settings_path):
-            with open(_settings_path, "r", encoding="utf-8") as _f:
-                _settings = _json.load(_f)
+        _settings_path = str(app_settings.settings_path())
+        _settings = app_settings.load_settings()
         _settings["overshoot_learning"] = {
             str(k): v for k, v in learning.items()}
         _tmp_path = _settings_path + ".tmp"
         with open(_tmp_path, "w", encoding="utf-8") as _f:
-            _json.dump(_settings, _f, indent=2, ensure_ascii=False)
-        _os.replace(_tmp_path, _settings_path)
+            json.dump(_settings, _f, indent=2, ensure_ascii=False)
+        os.replace(_tmp_path, _settings_path)
     except Exception:
         pass
 
@@ -1757,19 +1762,13 @@ class ExperimentWorker(QObject):
             # ---- 加载 overshoot 学习历史（跨实验持久化） ----
             _overshoot_learning = {}
             try:
-                import json as _json
-                _settings_path = os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)),
-                    "app_settings.json")
-                if os.path.exists(_settings_path):
-                    with open(_settings_path, "r", encoding="utf-8") as _f:
-                        _settings = _json.load(_f)
-                    _raw = _settings.get("overshoot_learning", {})
-                    _overshoot_learning = {
-                        float(k): float(v) for k, v in _raw.items()}
-                    if _overshoot_learning:
-                        _log(f"已加载 overshoot 学习数据: "
-                             f"{len(_overshoot_learning)} 个温度点")
+                _settings = app_settings.load_settings()
+                _raw = _settings.get("overshoot_learning", {})
+                _overshoot_learning = {
+                    float(k): float(v) for k, v in _raw.items()}
+                if _overshoot_learning:
+                    _log(f"已加载 overshoot 学习数据: "
+                         f"{len(_overshoot_learning)} 个温度点")
             except Exception:
                 pass  # 首次运行或无学习数据，使用默认值
 
@@ -2647,21 +2646,13 @@ class ExperimentWorker(QObject):
             except Exception:
                 pass
 
-            # ---- 保存 overshoot 学习数据到 app_settings.json ----
+            # ---- 保存 overshoot 学习数据到机器层设置（不入库） ----
             if _overshoot_learning:
                 try:
-                    import json as _json2
-                    _settings_path = os.path.join(
-                        os.path.dirname(os.path.dirname(__file__)),
-                        "app_settings.json")
-                    _settings = {}
-                    if os.path.exists(_settings_path):
-                        with open(_settings_path, "r", encoding="utf-8") as _f2:
-                            _settings = _json2.load(_f2)
+                    _settings = app_settings.load_settings()
                     _settings["overshoot_learning"] = {
                         str(k): v for k, v in _overshoot_learning.items()}
-                    with open(_settings_path, "w", encoding="utf-8") as _f2:
-                        _json2.dump(_settings, _f2, indent=2, ensure_ascii=False)
+                    app_settings.save_settings(_settings)
                     _log(f"已保存 overshoot 学习数据: "
                          f"{len(_overshoot_learning)} 个温度点")
                 except Exception as _save_err:

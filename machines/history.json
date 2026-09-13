@@ -1,0 +1,44 @@
+{
+  "_schema": {
+    "version": 1,
+    "sha": "完整 40 位提交 SHA（用完整值，短 hash 会随仓库增长变歧义）",
+    "machine": "machines/machines.json 里的机器代号；不确定就写 unknown，不要猜",
+    "confidence": "high=有直接证据 / medium=有间接证据 / low=推测 / unknown=无证据",
+    "evidence": "判定依据，必须写清是「看到了什么」而不是「觉得像什么」"
+  },
+  "_why": "历史提交早于本框架落地，没有 Machine: trailer，且**绝不能为了补 trailer 去改写历史**（会改变所有 SHA、作废既有 tag、并让其它机器上的 clone 分叉）。因此历史归属只能事后人工登记，由 sync/map_history.py 在生成 docs/machine-map.md 时作为兜底数据源。",
+  "_precedence": "commit 自带的 Machine: trailer 优先；trailer 缺失时查本表；本表也没有则记为 unknown。",
+  "_warning": "上游若发生 rebase / filter-branch 导致 SHA 变化，本表的条目会失效——sync/map_history.py 会警告并跳过，不会崩。",
+  "commits": [
+    {
+      "sha": "8443181e1bf4b0ab8e96ab951824885c263a1a5f",
+      "machine": "unknown",
+      "confidence": "unknown",
+      "evidence": "3.0 全新根提交（211 文件 / 70,799 行一次性导入），无路径或配置证据可指向具体机器；提交者邮箱 teskiel7@gmail.com 在本机与实验机都出现过。"
+    },
+    {
+      "sha": "c797aa4fd065651ecb27fc95556fa04d8259a100",
+      "machine": "pc-teski",
+      "confidence": "medium",
+      "evidence": "引入了 setup.bat / install.py / requirements.txt 三件套与 scraps wheel 直链；setup.bat 里的 SSH 引导逻辑与本机 ~/.ssh 现状（多密钥、github.com 走 443、IdentitiesOnly）吻合，且本机 2026-08-23 的 reflog 有对应提交记录。"
+    },
+    {
+      "sha": "032d1a0880c383eddaaf1e8ac525090293fc27c6",
+      "machine": "pc-teski",
+      "confidence": "high",
+      "evidence": "本机 reflog 完整保留 7fa01eb→rebase→032d1a0 的过程（HEAD@{0}..HEAD@{4}），且该提交至今仍是本机 master 的历史；README 中指向 YBCO-TA-data 的段落与本机 D:/code/project/YBCO-TA-data 部署一致。"
+    },
+    {
+      "sha": "45a6a3c3a7058f4af09780e39724187258a7dafb",
+      "machine": "lab-smlab",
+      "confidence": "medium",
+      "evidence": "该提交引入的 Noisesweep/gui_config.json、gui_config.py、noisesweep_config.json、启动.bat 里全部写死 C:/Users/smlab/... 与 C:/Windows/System32/YBCO-TA-3.0/...；README_personal.md 第 3 行自称是为替换 C:\\Windows\\System32\\YBCO-TA-3.0\\Noisesweep 里的 dashboard。属间接证据：路径来自实验机，但未排除在第三台机器上编辑、以实验机路径为值提交。"
+    },
+    {
+      "sha": "666c6580b7fe3d38a5c74c739d69ce7aba5d5342",
+      "machine": "lab-smlab",
+      "confidence": "low",
+      "evidence": "合并提交，作者与 45a6a3c 同为 teskiel7@gmail.com，时间仅相隔 115 秒，故与 45a6a3c 归为同一台机器；但 merge 本身可能在任何一台机器上执行，证据薄弱。"
+    }
+  ]
+}

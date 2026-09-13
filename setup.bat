@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
-title YBCO-TA 3.0 一键环境配置
+title YBCO-TA 一键环境配置（版本见 VERSION 文件）
 
 rem ========== 0. 定位脚本所在目录（兼容任意启动位置） ==========
 cd /d "%~dp0"
@@ -23,61 +23,84 @@ if not "!PYOK!"=="1" goto :install_python
 for /f "tokens=*" %%v in ('python --version 2^>nul') do set "PYVER=%%v"
 echo [2/7] [OK] Python !PYVER!
 
-rem ========== 3. SSH 密钥：生成、备份 config、打印公钥、验证连接 ==========
-if not exist "%SSHDIR%" mkdir "%SSHDIR%"
-if not exist "%SSHDIR%\id_ed25519" (
-    echo [3/7] 生成 SSH 密钥...
-    ssh-keygen -t ed25519 -C "teskiel7@gmail.com" -f "%SSHDIR%\id_ed25519" -N ""
-    if errorlevel 1 (
-        echo [X] 密钥生成失败
-        pause
-        exit /b 1
-    )
-) else (
-    echo [3/7] [OK] 已存在 SSH 密钥，跳过生成
-)
+rem ========== 3. SSH：先用既有配置试探，**通过就不动任何东西** ==========
+rem
+rem 历史教训：本脚本原先只看 %SSHDIR%\id_ed25519 存不存在，不看该密钥是否
+rem 真的被 github.com 使用。于是当机器上已有可用配置（例如 config 里用
+rem IdentitiesOnly 指向 id_ed25519_ybco3）时，脚本会生成一把**用不上**的
+rem 新密钥、把它打印出来让人去 GitHub 添加，然后验证失败——排查半天。
+rem 现在的顺序是：先试探 → 通过就跳过密钥与 config 的一切改动。
+set "SSHOK=0"
+ssh -T -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes git@github.com 2>&1 | findstr /i "successfully authenticated" >nul
+if not errorlevel 1 set "SSHOK=1"
 
-if not exist "%SSHDIR%\config" (
-    (echo Host github.com
-    echo     Hostname ssh.github.com
-    echo     Port 443
-    echo     User git) > "%SSHDIR%\config"
-    echo [3/7] 已写入 ssh config（github.com 走 ssh.github.com:443）
+if "!SSHOK!"=="1" (
+    echo [3/7] [OK] 既有 SSH 配置已能连上 GitHub，跳过密钥生成与 config 修改
 ) else (
-    findstr /i /c:"Host github.com" "%SSHDIR%\config" >nul
-    if errorlevel 1 (
-        copy /y "%SSHDIR%\config" "%SSHDIR%\config.bak" >nul
-        (echo.
-        echo Host github.com
+    echo [3/7] 既有配置连不上 GitHub，检查/生成密钥...
+    if not exist "!SSHDIR!" mkdir "!SSHDIR!"
+    if not exist "!SSHDIR!\id_ed25519" (
+        echo [3/7] 生成 SSH 密钥...
+        ssh-keygen -t ed25519 -C "teskiel7@gmail.com" -f "!SSHDIR!\id_ed25519" -N ""
+        if errorlevel 1 (
+            echo [X] 密钥生成失败
+            pause
+            exit /b 1
+        )
+    ) else (
+        echo [3/7] [OK] 已存在 !SSHDIR!\id_ed25519，跳过生成
+    )
+
+    if not exist "!SSHDIR!\config" (
+        (echo Host github.com
         echo     Hostname ssh.github.com
         echo     Port 443
-        echo     User git) >> "%SSHDIR%\config"
-        echo [3/7] 已备份原 config 为 config.bak，并追加 github.com 条目
+        echo     User git) > "!SSHDIR!\config"
+        echo [3/7] 已写入 ssh config（github.com 走 ssh.github.com:443）
     ) else (
-        echo [3/7] [OK] ssh config 已含 github.com 条目，跳过
+        findstr /i /c:"Host github.com" "!SSHDIR!\config" >nul
+        if errorlevel 1 (
+            copy /y "!SSHDIR!\config" "!SSHDIR!\config.bak" >nul
+            (echo.
+            echo Host github.com
+            echo     Hostname ssh.github.com
+            echo     Port 443
+            echo     User git) >> "!SSHDIR!\config"
+            echo [3/7] 已备份原 config 为 config.bak，并追加 github.com 条目
+        ) else (
+            echo [3/7] [OK] ssh config 已含 github.com 条目，跳过
+            echo       若下面验证仍失败，请检查该条目是否指定了
+            echo       IdentityFile / IdentitiesOnly，导致本脚本生成的密钥不被使用。
+        )
     )
+
+    echo.
+    echo 请把下面的公钥完整复制，添加到 GitHub：
+    echo     网页 - Settings - SSH and GPG keys - New SSH key
+    echo     （标题随意，如 YBCO-TA-3.0-NewPC；类型选 Authentication Key）
+    echo.
+    type "!SSHDIR!\id_ed25519.pub"
+    echo.
+    pause
 )
 
-echo.
-echo 请把下面的公钥完整复制，添加到 GitHub：
-echo     网页 - Settings - SSH and GPG keys - New SSH key
-echo     （标题随意，如 YBCO-TA-3.0-NewPC；类型选 Authentication Key）
-echo.
-type "%SSHDIR%\id_ed25519.pub"
-echo.
-pause
+if "!SSHOK!"=="1" goto :after_ssh
 
 :ssh_retry
 echo [3/7] 验证 GitHub SSH 连接（ssh.github.com:443）...
 ssh -T -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 git@github.com 2>&1 | findstr /i "successfully authenticated" >nul
 if errorlevel 1 (
     echo [X] 验证失败：公钥未生效或网络不通。
+    echo     若本机 ssh config 里 github.com 条目指定了 IdentityFile，
+    echo     请确认它指向的就是刚刚添加的那把密钥。
     set /p RETRY=公钥已添加后按 Y 重试，按其他键退出:
     if /i "!RETRY!"=="Y" goto :ssh_retry
     pause
     exit /b 1
 )
 echo [3/7] [OK] SSH 验证通过
+
+:after_ssh
 
 rem ========== 4. git 全局 URL 重写：https 改写为 ssh（走 443） ==========
 git config --global --get url."git@github.com:".insteadOf >nul 2>&1
@@ -143,8 +166,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem ========== 8. （可选）登记机器代号 + 安装同步钩子 ==========
+rem 多机协作要求每台机器有一个稳定代号，用来在提交与版本标签里标明
+rem "这条改动出自哪台电脑"。详见 docs/multi-machine.md。
 echo.
-echo [OK] YBCO-TA 3.0 环境配置全部完成！
+echo ============================================================
+echo  最后一步（多机协作，强烈建议）：登记本机机器代号
+echo ============================================================
+echo  用法：python sync/setup_machine.py --id ^<代号^>
+echo    已登记的代号见 machines/machines.json
+echo    新机器加 --add，例如：
+echo      python sync/setup_machine.py --add --id lab-pc2 --label "实验机2" --role lab
+echo.
+echo  登记后会自动安装 git 钩子：提交带机器标识，忘记同步/提交时推送会被拦下。
+echo  完成后再跑一次体检：python sync/check.py
+echo ============================================================
+echo.
+
+echo [OK] YBCO-TA 环境配置全部完成！（版本见 VERSION 文件）
 echo      启动：python Auto_Sweep/app.py （测量 GUI）
 echo      硬件：NI-VISA / NI-DAQmx 运行时需另行安装
 pause
