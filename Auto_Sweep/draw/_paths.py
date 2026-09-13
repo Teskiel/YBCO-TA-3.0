@@ -3,9 +3,8 @@ r"""绘图脚本的**路径解析**（多机协作，见 docs/multi-machine.md �
 
 背景
 ----
-`draw/` 下的脚本曾把缓存与数据根目录写死成旧机器的绝对路径：
-
-    D:/YBCO/VNAMeas/Auto_Sweep/experiment_data/~merged/output/_cache/...
+`draw/` 下的脚本曾把缓存与数据根目录写死成旧机器数据盘的绝对路径
+（形如 `D:/<旧机器>/VNAMeas/Auto_Sweep/experiment_data/~merged/...`）：
 
 后果有两个，且都不是"将来某天才会疼"：
 

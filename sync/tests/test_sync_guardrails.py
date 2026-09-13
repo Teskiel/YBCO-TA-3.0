@@ -124,11 +124,24 @@ PATH_SCAN_WHITELIST = {
         "规范文档举例说明「曾经写死了什么」，正是它要防止的问题",
     "machines/history.json":
         "历史归属登记的判定依据，必须记录当时看到的路径作为证据",
+    "machines/machines.json":
+        "机器注册表本身就要登记各机的部署路径（含 `_schema` 里的示例）",
+    "sync/releases/INDEX.md":
+        "发布索引必须记录追溯判定依据，否则历史归属不可复核",
     "sync/check.py":
         "检查器自身的模式串",
+    "sync/machine_config.py":
+        "分层加载器的 docstring 用真实反例说明问题",
+    "sync/release.py":
+        "发布工具用测试数据举例",
     "sync/tests/test_sync_guardrails.py":
         "本测试的模式串",
 }
+
+#: 只对**代码与配置**做机器路径扫描；`.md` 是散文，讨论历史路径正是它的职责。
+#: 这条区分很关键：把文档也扫进来，只会逼着人把"我们曾经写死过 X"这句话删掉，
+#: 而那句话恰恰是防止回潮最有用的东西。
+SCANNED_SUFFIXES = (".py", ".json", ".bat", ".txt", ".cfg", ".ini", ".ps1", ".sh")
 
 
 def _tracked_files() -> list[str]:
@@ -164,7 +177,7 @@ def test_given_repo_when_scanning_tracked_files_then_no_machine_specific_paths()
     for rel in _tracked_files():
         if rel in PATH_SCAN_WHITELIST:
             continue
-        if not rel.endswith((".py", ".json", ".md", ".bat", ".txt", ".cfg", ".ini")):
+        if not rel.endswith(SCANNED_SUFFIXES):
             continue
         text = _normalize(_read_tracked(rel))
         for pattern in FORBIDDEN_PATH_PATTERNS:
@@ -195,7 +208,7 @@ def test_given_repo_when_scanning_tracked_files_then_legacy_allowlist_does_not_g
     for rel in _tracked_files():
         if rel in PATH_SCAN_WHITELIST:
             continue
-        if not rel.endswith((".py", ".json", ".md", ".bat", ".txt")):
+        if not rel.endswith(SCANNED_SUFFIXES):
             continue
         if not pattern.search(_normalize(_read_tracked(rel))):
             continue
@@ -499,25 +512,46 @@ def test_given_claude_md_drift_when_read_then_entrypoints_exist():
 
 
 def test_given_repo_when_checked_then_removed_entrypoints_are_not_documented():
-    """已被 3.1 删除的旧入口不得再出现在任何入库文档里。"""
+    """已被 3.1 删除的旧入口不得再出现在任何入库文档里（"现行用法"意义上）。
+
+    实测漂移过：`Noisesweep/CLAUDE.md` 曾把 `kid_measurement_gui_v3.py` 写成
+    "运行入口"，而 3.1 已把它重命名。
+
+    "已移除"语境下的提及是**允许且鼓励**的（免得有人照着旧路径去找），所以判断
+    依据看的是**整段**而非单行——引用块（`>`）经常把关键词放在隔了一行的位置。
+    """
     dead = ("noisesweep_dashboard.py", "kid_measurement_gui_v3.py")
-    offenders = []
+    removed_ok = ("已移除", "已删除", "取代", "废弃", "不再", "removed", "删除")
+    skip = {"Noisesweep/README_personal.md", "docs/multi-machine.md",
+            "machines/history.json", "sync/tests/test_sync_guardrails.py",
+            "sync/releases/INDEX.md"}
+
+    def paragraphs(text: str):
+        """把文本切成段：空行分隔；引用块连续行合并为一段。"""
+        block: list[str] = []
+        for line in text.splitlines():
+            if line.strip():
+                block.append(line)
+            elif block:
+                yield "\n".join(block)
+                block = []
+        if block:
+            yield "\n".join(block)
+
+    offenders: list[str] = []
     for rel in _tracked_files():
-        if not rel.endswith((".md", ".bat")):
+        if not rel.endswith((".md", ".bat")) or rel in skip:
             continue
-        if rel in ("Noisesweep/README_personal.md", "docs/multi-machine.md",
-                   "machines/history.json", "sync/tests/test_sync_guardrails.py"):
-            continue
-        text = _read_tracked(rel)
-        for name in dead:
-            # 允许出现在"已移除/已废弃"这类说明里
-            for line in text.splitlines():
-                if name in line and not any(
-                        kw in line for kw in ("已移除", "已删除", "取代", "旧", "不再",
-                                              "removed", "废弃")):
-                    offenders.append(f"{rel}: {line.strip()[:100]}")
-                    break
-    assert not offenders, "旧入口仍在文档中作为现行用法出现：\n  " + "\n  ".join(offenders)
+        for para in paragraphs(_read_tracked(rel)):
+            if any(name in para for name in dead) and \
+                    not any(kw in para for kw in removed_ok):
+                first = para.splitlines()[0].strip()[:100]
+                offenders.append(f"{rel}: {first}")
+
+    assert not offenders, (
+        "以下文档把已被移除的旧入口当作现行用法介绍（若只是说明「已移除」，"
+        "请在该段里明确写出「已移除 / 取代 / 废弃」等字样）：\n  "
+        + "\n  ".join(offenders))
 
 
 # ── 9. 框架自身的可运行性 ────────────────────────────────────────────────
