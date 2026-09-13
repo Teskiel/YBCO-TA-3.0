@@ -578,3 +578,139 @@ def test_given_check_script_when_json_output_then_schema_is_stable():
     for key in ("machine", "branch", "ahead", "behind", "issues", "summary"):
         assert key in payload, f"check.py --json 缺字段 {key}"
     assert "id" in payload["machine"] and "source" in payload["machine"]
+
+
+# ── 10. pre-push：默认询问，不是必须 ────────────────────────────────────
+
+class _FakeStdin:
+    """伪造 stdin 的 isatty()，用来在测试里确定性地走"交互式"分支。"""
+
+    def __init__(self, tty: bool):
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+@pytest.fixture
+def pre_push_mod(monkeypatch):
+    """拿到 pre_push 模块，并清掉可能影响结果的环境变量。"""
+    import pre_push
+    monkeypatch.delenv(pre_push.PUSH_MODE_ENV, raising=False)
+    monkeypatch.delenv(pre_push.SKIP_ENV, raising=False)
+    return pre_push
+
+
+def test_given_red_items_when_not_a_terminal_then_allows_with_warning(
+        pre_push_mod, monkeypatch, capsys):
+    """非交互环境（AI agent / CI / 管道）必须**放行**，只打警告。
+
+    这是刻意的设计取舍：人不在场时宁可不拦，也不阻断自动化流程。
+    代价是这些环境下门禁失效——所以警告必须醒目，且提示如何改成硬拦。
+    """
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=False))
+    monkeypatch.setattr("builtins.input",
+                        lambda *a, **k: pytest.fail("非交互时不该询问"))
+
+    rc = pre_push_mod._ask_or_allow(3)
+    out = capsys.readouterr().out
+
+    assert rc == pre_push_mod.EXIT_OK, "非交互时应放行"
+    assert "继续推送" in out and "3 项" in out, "警告必须写明带了几项问题"
+    assert pre_push_mod.PUSH_MODE_ENV in out, "必须提示如何改成硬拦"
+
+
+@pytest.mark.parametrize("answer,expected_blocked", [
+    ("", False), ("y", False), ("Y", False), ("yes", False),
+    ("n", True), ("N", True), ("no", True), ("q", True),
+])
+def test_given_terminal_when_answered_then_default_is_continue(
+        pre_push_mod, monkeypatch, answer, expected_blocked):
+    """终端里回答 Enter/y = 继续，n = 中止。默认是"继续"，不是"必须处理"。"""
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=True))
+    monkeypatch.setattr("builtins.input", lambda *a, **k: answer)
+
+    rc = pre_push_mod._ask_or_allow(2)
+    if expected_blocked:
+        assert rc == pre_push_mod.EXIT_BLOCK, f"答 {answer!r} 应中止"
+    else:
+        assert rc == pre_push_mod.EXIT_OK, f"答 {answer!r} 应继续"
+
+
+def test_given_eof_when_asking_then_allows_instead_of_hanging(
+        pre_push_mod, monkeypatch, capsys):
+    """stdin 关闭/被打断时不能挂住，也不能误判成中止。"""
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=True))
+
+    def _boom(*a, **k):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _boom)
+    rc = pre_push_mod._ask_or_allow(1)
+    assert rc == pre_push_mod.EXIT_OK
+    assert "未收到答复" in capsys.readouterr().out
+
+
+def test_given_block_mode_then_refuses_without_asking(
+        pre_push_mod, monkeypatch, capsys):
+    """想硬拦的人显式设 block —— 这是唯一的强制阻断开关。"""
+    monkeypatch.setenv(pre_push_mod.PUSH_MODE_ENV, "block")
+    monkeypatch.setattr("builtins.input",
+                        lambda *a, **k: pytest.fail("block 模式不该询问"))
+
+    rc = pre_push_mod._ask_or_allow(4)
+    assert rc == pre_push_mod.EXIT_BLOCK
+    assert "block" in capsys.readouterr().out
+
+
+def test_given_allow_mode_then_allows_without_asking(
+        pre_push_mod, monkeypatch, capsys):
+    monkeypatch.setenv(pre_push_mod.PUSH_MODE_ENV, "allow")
+    monkeypatch.setattr("builtins.input",
+                        lambda *a, **k: pytest.fail("allow 模式不该询问"))
+
+    rc = pre_push_mod._ask_or_allow(4)
+    assert rc == pre_push_mod.EXIT_OK
+    assert pre_push_mod.PUSH_MODE_ENV in capsys.readouterr().out
+
+
+def test_given_invalid_mode_when_resolved_then_falls_back_to_ask(
+        pre_push_mod, monkeypatch, capsys):
+    """环境变量写错时给提示并退回 ask，不要静默按 block/allow 处理。"""
+    monkeypatch.setenv(pre_push_mod.PUSH_MODE_ENV, "yes-please")
+    monkeypatch.setattr(sys, "stdin", _FakeStdin(tty=False))
+
+    rc = pre_push_mod._ask_or_allow(1)
+    out = capsys.readouterr().out
+    assert rc == pre_push_mod.EXIT_OK
+    assert "不是有效值" in out
+
+
+def test_given_check_only_when_red_items_then_never_blocks():
+    """`--check-only` 是脚本/CI 的报告模式，任何情况下都不阻断。
+
+    这条很重要：之前 `--check-only` 在有红项时也会返回 1，会让把它当
+    "只读报告"用的调用方误以为出错。
+    """
+    proc = subprocess.run(
+        [sys.executable, str(SYNC_DIR / "pre_push.py"), "--check-only",
+         "--range", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef..HEAD"],
+        capture_output=True, cwd=str(REPO_ROOT))
+    out = proc.stdout.decode("utf-8", "replace")
+    assert proc.returncode == 0, f"--check-only 不该返回非零：{proc.returncode}"
+    assert "仅为警告" in out or "检查通过" in out
+
+
+def test_given_hook_shell_wrapper_when_read_then_never_blocks_hard():
+    """钩子薄壳里不应残留"无条件 exit 1"的写法。
+
+    真正的判断在 pre_push.py（默认询问）。薄壳若自行 exit 1，就会绕过
+    用户选择，把"询问"变回"必须"。
+    """
+    hook = (SYNC_DIR / "hooks" / "pre-push").read_text(encoding="utf-8")
+    body = "\n".join(ln for ln in hook.splitlines()
+                     if not ln.strip().startswith("#"))
+    assert "exit 1" not in body, (
+        "pre-push 薄壳里出现 exit 1：这会让询问失效，改回强制阻断")
+    # 找不到 python 时应当是"放行 + 提示"，不是"阻断"
+    assert "exit 0" in body

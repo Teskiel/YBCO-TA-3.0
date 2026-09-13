@@ -111,27 +111,55 @@ Machine-Ref: <主机名>/<用户>/<系统>/py<版本>
 
 `type` 取 `feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `perf`。
 
-### 3.3 推送：门禁挡在 push 之前
+### 3.3 推送：先提醒，**由你决定**要不要继续
 
-`pre-push` 钩子会阻断这四种情况：
+`pre-push` 钩子检查这四种情况，但**默认是询问，不是必须**：
 
-| 🔴 阻断项 | 为什么 |
+| 🔴 需要你确认 | 为什么值得确认 |
 |---|---|
 | 落后于上游 | 你的推送建立在旧基础上，等于把别人的工作盖回去 |
 | 有未提交改动 | 这些改动不会随 push 上传——**最常见的"忘了上传"** |
 | 存在 stash | stash 不在任何提交里，换机器必丢 |
 | 提交缺 `Machine:` 标识 | 无法追溯是哪台机器做的 |
 
-🟡 仅提示：未跟踪的源码类文件、命中接缝文件、单次推送积压过多。
+🟡 仅提示、从不询问：未跟踪的源码类文件、命中接缝文件、单次推送积压过多。
 
-紧急绕过：
+#### 行为矩阵
+
+| 场景 | 行为 |
+|---|---|
+| 人在终端前 | **询问**：`[Enter/y]` 继续（默认）　`[n]` 中止　`[a]` 继续且本次会话不再问 |
+| 非交互（AI agent / CI / 管道 / 输入已关闭） | **放行 + 醒目警告**，绝不阻断自动化流程 |
+| `YBCO_PUSH_MODE=ask` | 强制询问（非交互时按"放行"处理） |
+| `YBCO_PUSH_MODE=allow` | 强制放行（只打印警告） |
+| `YBCO_PUSH_MODE=block` | **强制阻断**——给"我不想被问、就要硬拦"的人 |
+| `YBCO_SKIP_HOOKS=1` | 完全跳过检查（打印留痕） |
 
 ```bash
+# 想硬拦（例如测量机上不希望误推旧基础）
+YBCO_PUSH_MODE=block git push
+
+# 完全跳过
 YBCO_SKIP_HOOKS=1 git push
 ```
 
-绕过会打印醒目留痕，并且 `check.py` 会把 `YBCO_SKIP_HOOKS` 已设置这件事
-列为 🟡 提示——**别让它变成常态**。
+#### 为什么默认放行而不是默认拦住
+
+因为"默认拦住"在实践中会退化成"反正每次都要加 `--no-verify`"——那样检查就
+**彻底失效**了，连提醒都看不到。而"默认询问 + 非交互放行"保证：
+
+1. 人在场时一定会看到这四项，并被问一句；
+2. 自动化流程不会被人不在场的检查卡死；
+3. 真想硬拦的人有一个显式、语义清晰的开关（`block`），不需要到处加绕过参数。
+
+代价要认：**非交互环境下这套检查挡不住"忘了上传"**。所以它只是"提醒"，
+最终防线仍然是 §3.4 的收工体检 `python sync/check.py`。
+
+`--check-only` 是给脚本用的报告模式，**任何情况下都不阻断**（永远退出 0）：
+
+```bash
+python sync/pre_push.py --check-only --range origin/master..HEAD
+```
 
 ### 3.4 收工：确认没有留下未上传的东西
 
@@ -310,6 +338,11 @@ python sync/check.py                              # 体检（人类可读）
 python sync/check.py --json                       # 机读
 python sync/check.py --strict                     # 有 🔴 时退出码 1
 python sync/check.py --offline                    # 不联网
+
+# 推送前检查（默认询问；--check-only 只报告不阻断）
+python sync/pre_push.py --check-only --range origin/master..HEAD
+YBCO_PUSH_MODE=block git push                     # 改成硬拦
+YBCO_PUSH_MODE=allow git push                     # 改成静默放行
 
 # 发布
 python sync/release.py --bump patch --message "…"

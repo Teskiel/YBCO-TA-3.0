@@ -13,7 +13,10 @@ YBCO 高温超导 KID（动力学电感探测器）微波测量平台 —— **�
 
 - **机器代号**：`machines/machines.json` 注册表 + `python sync/setup_machine.py --id <代号>` 一次性认机。
 - **提交溯源**：git 钩子自动补齐 `Machine: <代号>` trailer；缺失时 `commit-msg` 拒绝提交。
-- **推送门禁**：`pre-push` 阻断「落后于远端 / 有未提交改动 / 有 stash / 缺机器标识」四种情况。
+- **推送提醒**：`pre-push` 检查「落后于远端 / 有未提交改动 / 有 stash / 缺机器标识」，
+  **默认询问你要不要继续**（终端里按 Enter 即继续、按 n 中止）。非交互环境
+  （AI agent / CI / 管道）**放行并打印醒目警告**，不阻断自动化。想要硬拦：
+  `YBCO_PUSH_MODE=block git push`。
 - **体检工具**：`python sync/check.py` 一次回答本机身份、与 origin 的差距、漏交、漏推、风险。
 - **发布溯源**：`python sync/release.py` 打**附注标签**（message 含机器归属）并自动追加发布索引
   [`sync/releases/INDEX.md`](sync/releases/INDEX.md)。
@@ -72,8 +75,9 @@ python sync/setup_machine.py --id <机器代号>   # 每台机器只需一次：
 python sync/check.py                          # 开工/收工体检
 ```
 
-装好钩子后，提交会自动带 `Machine: <机器代号>` 标识；忘记同步 / 忘记提交 /
-忘记标识时，`git push` 会被挡下来并说明原因。
+装好钩子后，提交会自动带 `Machine: <机器代号>` 标识；推送前会检查有没有
+"忘了同步 / 忘了提交 / 忘了标识"并**问你一句**要不要继续（也可以设
+`YBCO_PUSH_MODE=block` 改成硬拦）。
 
 | 想知道 | 看这里 |
 |---|---|
