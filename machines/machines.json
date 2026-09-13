@@ -26,8 +26,8 @@
       "hostname": "",
       "os": "Windows",
       "python": "3.14",
-      "repo_path": "C:/Users/smlab/YBCO-TA-3.0",
-      "notes": "原部署在 C:/Windows/System32/YBCO-TA-3.0（需管理员权限且受 UAC 虚拟化影响，建议迁移）。hostname 待该机跑 setup_machine.py 时回填。3.1 版本与 45a6a3c/666c658 由其产出（由 C:/Users/smlab 路径证据反推，置信度中）。"
+      "repo_path": "<待确认：该机实际克隆位置。历史为 C:/Windows/System32/YBCO-TA-3.0（不推荐，见 notes）>",
+      "notes": "原部署在 C:/Windows/System32/YBCO-TA-3.0——该目录需要管理员权限且受 UAC 文件虚拟化影响（读写可能被悄悄重定向），**建议迁到 C:/Users/smlab/ 或 D:/**。上面的 repo_path 是建议值，未实测，迁移后请回填真实路径。hostname 待该机跑 setup_machine.py --id lab-smlab 时按实际值修正。3.1 版本与提交 45a6a3c/666c658 由其产出（由该提交写死的实验机路径反推，置信度中，依据见 machines/history.json）。"
     },
     {
       "id": "pc-merge",

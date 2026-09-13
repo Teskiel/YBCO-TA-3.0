@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -325,17 +326,52 @@ def collect(root: Path, offline: bool = False) -> Report:
                 "记得回头看这一条，别把它当成常态")
 
     # 机器专属路径是否被提交进库（红线：仓库是 PUBLIC）
-    leak = git_out(["grep", "-n", "-I", "-E",
-                    r"C:\\\\Users\\\\smlab|C:/Users/smlab|C:/Windows/System32/YBCO-TA-3.0",
-                    "HEAD", "--", "."], cwd=root, check=False)
-    leak_lines = [ln for ln in leak.splitlines()
-                  if not ln.startswith("HEAD:Noisesweep/README_personal.md")]
+    #
+    # 只扫**代码与配置**。为什么不扫 .md 与注册表：那些文件里出现真实路径是
+    # 它们**存在的意义**——规范文档要举例说明"曾经写死了什么"，history.json 与
+    # 发布索引要留下判定依据，machines.json 要登记各机的部署路径。把它们一起
+    # 报红，只会逼着人删掉最有价值的证据。这与 sync/tests 里的白名单口径一致。
+    leak_lines = _scan_sensitive_paths(root)
     if leak_lines:
         rep.add("red", "risk",
-                "库内仍存在机器专属绝对路径（换机器即坏，且仓库是 PUBLIC）",
+                "库内代码/配置中仍存在机器专属绝对路径（换机器即坏，且仓库是 PUBLIC）",
                 leak_lines[:10])
 
     return rep
+
+
+#: 只扫这些后缀——口径与 sync/tests/test_sync_guardrails.py 保持一致
+_SCANNED_SUFFIXES = (".py", ".json", ".bat", ".txt", ".cfg", ".ini", ".ps1", ".sh")
+
+#: 以数据/证据形式记录路径的文件（见 sync/tests 里的同名白名单及理由）
+_PATH_SCAN_SKIP = (
+    "machines/machines.json", "machines/history.json",
+    "sync/releases/INDEX.md", "sync/check.py", "sync/machine_config.py",
+    "sync/release.py", "sync/setup_machine.py",
+    "sync/tests/test_sync_guardrails.py",
+)
+
+_SENSITIVE_RE = re.compile(
+    r"C:\\\\?Users\\\\?smlab|C:/Users/smlab|C:/Windows/System32/YBCO-TA-3.0",
+    re.IGNORECASE)
+
+
+def _scan_sensitive_paths(root: Path) -> list[str]:
+    """在入库的代码/配置里找机器专属绝对路径。返回 "文件:行号: 内容" 列表。"""
+    hits: list[str] = []
+    for rel in git_out(["ls-files"], cwd=root, check=False).splitlines():
+        rel = rel.strip().strip('"')
+        if not rel or rel in _PATH_SCAN_SKIP:
+            continue
+        if not rel.lower().endswith(_SCANNED_SUFFIXES):
+            continue
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if _SENSITIVE_RE.search(text):
+            hits.append(rel)
+    return hits
 
 
 # ── 输出 ──────────────────────────────────────────────────────────────────
