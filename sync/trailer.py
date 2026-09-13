@@ -184,6 +184,11 @@ def main(argv=None) -> int:
         prog="trailer.py",
         description="补齐/校验提交消息里的 Machine: 机器标识 trailer。")
     ap.add_argument("--file", dest="file", help="commit message 文件路径")
+    ap.add_argument("message_file", nargs="?", default=None,
+                    help="同上，也接受位置参数写法（`--check <文件>`）。"
+                         "历史上钩子曾写成 `--check \"$1\"`，而 `--check` 是布尔"
+                         "开关，于是 argparse 报 'unrecognized arguments'——"
+                         "两种写法都收下，避免同类失误再次变成「提交做不了」。")
     ap.add_argument("--check", action="store_true", help="只校验，不写回")
     ap.add_argument("--print", dest="show", action="store_true",
                     help="打印结果而不写回文件")
@@ -202,14 +207,16 @@ def main(argv=None) -> int:
     if args.amend_head:
         return cmd_amend_head(root)
 
-    if not args.file:
+    # 规范写法是 `--file <路径>`；位置参数只是兼容写法
+    target = args.file or args.message_file
+    if not target:
         ap.print_help()
         return EXIT_CONFIG_ERROR
 
     if args.source in SKIP_SOURCES:
         return EXIT_OK
 
-    return cmd_file(Path(args.file), root, args.check, args.show)
+    return cmd_file(Path(target), root, args.check, args.show)
 
 
 if __name__ == "__main__":

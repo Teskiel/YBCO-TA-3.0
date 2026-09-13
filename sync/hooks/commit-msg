@@ -25,4 +25,7 @@ if [ -z "$PY" ]; then
 fi
 
 # shellcheck disable=SC2086
-exec $PY "$(git rev-parse --show-toplevel)/sync/trailer.py" --check "$1"
+# 注意：`--check` 是布尔开关，不接受取值，消息文件必须走 `--file`。
+# 写成 `--check "$1"` 会让 argparse 把文件路径当成多余的位置参数而报
+# "unrecognized arguments"——实测踩过，改这里时别再合并成一条。
+exec $PY "$(git rev-parse --show-toplevel)/sync/trailer.py" --check --file "$1"

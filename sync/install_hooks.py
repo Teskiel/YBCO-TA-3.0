@@ -110,9 +110,10 @@ def install(root: Path) -> int:
               "（要恢复就删掉我们的版本并改回名字）")
 
     print("\n现在起：")
-    print("  · 提交会自动带 Machine: <机器代号> 标识")
-    print("  · 忘记同步/忘记提交/忘记标识时，push 会被挡下来并说明原因")
-    print(f"  · 紧急绕过：YBCO_SKIP_HOOKS=1 git push")
+    print("  · 提交会自动带 Machine: <机器代号> 标识（缺失则拒绝提交）")
+    print("  · 推送前会检查「落后/未提交/stash/缺标识」，并**问你一句**要不要继续")
+    print(f"  · 想改成硬拦：YBCO_PUSH_MODE=block git push")
+    print(f"  · 想完全跳过：YBCO_SKIP_HOOKS=1 git push")
     return EXIT_OK
 
 

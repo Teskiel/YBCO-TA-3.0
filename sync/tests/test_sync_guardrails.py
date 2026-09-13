@@ -733,3 +733,109 @@ def test_given_hook_shell_wrapper_when_read_then_never_blocks_hard():
         "pre-push 薄壳里出现 exit 1：这会让询问失效，改回强制阻断")
     # 找不到 python 时应当是"放行 + 提示"，不是"阻断"
     assert "exit 0" in body
+
+
+# ── 11. 钩子薄壳调用 trailer.py 的实参必须合法 ──────────────────────────
+#
+# 为什么专门测这个：曾实测踩坑——commit-msg 薄壳写成
+#     trailer.py --check "$1"
+# 而 `--check` 是布尔开关、不接受取值，于是 argparse 把消息文件路径当成多余的
+# 位置参数，报 "unrecognized arguments: .git/COMMIT_EDITMSG"。
+# 后果不是"少个提示"，而是**提交直接做不了**，而且报错信息看着像 CLI 用法问题，
+# 很容易被当成环境问题排查半天。
+#
+# 这里用"解析薄壳里的实参 + 拿去问 trailer.py 自己的 parser"来验证，
+# 而不是硬编码期望字符串——将来改 CLI 时它会自动跟着变。
+
+def _hook_invocations() -> list[tuple[str, str]]:
+    """从钩子薄壳里抽出对 trailer.py / pre_push.py 的调用**行**（去掉重定向）。"""
+    found: list[tuple[str, str]] = []
+    for hook in sorted((SYNC_DIR / "hooks").iterdir()):
+        if not hook.is_file():
+            continue
+        for line in hook.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("#"):
+                continue
+            if "sync/trailer.py" not in line and "sync/pre_push.py" not in line:
+                continue
+            script = "trailer.py" if "sync/trailer.py" in line else "pre_push.py"
+            tail = line.split(f"/sync/{script}", 1)[1]
+            tail = tail.split("2>")[0].split("||")[0].strip()
+            found.append((hook.name, script + " " + tail))
+    return found
+
+
+def test_given_hook_invocations_when_run_against_real_cli_then_accepted(workdir):
+    """钩子里调用的实参必须能被**真实 CLI** 接受。
+
+    曾实测踩坑：commit-msg 薄壳写成 `trailer.py --check "$1"`，而 `--check`
+    是布尔开关、不接受取值，于是 argparse 把消息文件当成多余的位置参数，
+    报 "unrecognized arguments: .git/COMMIT_EDITMSG"。后果不是"少个提示"，
+    而是**提交直接做不了**，且报错看着像 CLI 用法问题，极易被误判成环境问题。
+
+    这里不重建 parser，而是把占位实参替换成真文件后**直接跑真实脚本**，
+    只断言它不是被 argparse 拒绝——比模拟更可信。
+    """
+    msg = workdir / "MSG"
+    msg.write_text("probe: no trailer\n", encoding="utf-8")
+
+    invocations = _hook_invocations()
+    assert invocations, "没有从钩子薄壳里抽到任何调用——检查 _hook_invocations"
+
+    problems: list[str] = []
+    for hook_name, cmdline in invocations:
+        resolved = (cmdline
+                    .replace("${2:-}", "message")
+                    .replace("$1", str(msg))
+                    .replace('"', ""))
+        # 钩子会把 python 解释器放在最前面，这里替换成当前解释器
+        parts = resolved.split()
+        script_path = SYNC_DIR / parts[0]
+        argv = parts[1:]
+        proc = subprocess.run(
+            [sys.executable, str(script_path), *argv],
+            capture_output=True, cwd=str(REPO_ROOT))
+        stderr = proc.stderr.decode("utf-8", "replace")
+        if "unrecognized arguments" in stderr or "expected one argument" in stderr:
+            problems.append(
+                f"{hook_name} → {resolved}\n"
+                f"        argparse 拒绝：{stderr.strip().splitlines()[-1] if stderr.strip() else ''}\n"
+                f"        修法：布尔开关（--check / --check-only）不接受取值，"
+                f"消息文件须走 --file")
+
+    assert not problems, "钩子调用与 CLI 不匹配：\n  " + "\n  ".join(problems)
+
+
+def test_given_trailer_check_with_both_forms_then_both_accepted():
+    """`--check --file X` 与 `--check X` 都要能用。
+
+    兼容位置参数写法是防御性的：即便将来有人把薄壳写回旧形式，
+    也不会再次变成"提交做不了"。
+    """
+    msg = REPO_ROOT / ".tmp_synctest" / "trailer-forms.txt"
+    os.makedirs(msg.parent, exist_ok=True)
+    msg.write_text("probe: no trailer\n", encoding="utf-8")
+
+    for argv in (["--check", "--file", str(msg)],
+                 ["--check", str(msg)],
+                 ["--file", str(msg), "--source", "message"]):
+        proc = subprocess.run(
+            [sys.executable, str(SYNC_DIR / "trailer.py"), *argv],
+            capture_output=True, cwd=str(REPO_ROOT))
+        assert "unrecognized arguments" not in proc.stderr.decode("utf-8", "replace"), \
+            f"写法 {argv} 被 argparse 拒绝"
+
+
+def test_given_installed_commit_msg_hook_when_read_then_matches_source():
+    """已安装的钩子必须与 sync/hooks/ 里的源本一致。
+
+    否则会出现"我修好了但机器上跑的还是旧的"——实测踩过：修完 commit-msg
+    源码后必须重跑 install 才会生效。
+    """
+    src = SYNC_DIR / "hooks" / "commit-msg"
+    dst = REPO_ROOT / ".git" / "hooks" / "commit-msg"
+    if not dst.exists():
+        pytest.skip("本机未安装钩子（未跑 setup_machine.py）")
+    assert src.read_text(encoding="utf-8") == dst.read_text(encoding="utf-8"), (
+        "已安装的 commit-msg 与源本不一致——请重跑："
+        "python sync/install_hooks.py install")
