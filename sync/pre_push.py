@@ -206,7 +206,8 @@ def main(argv=None) -> int:
     ap.add_argument("--check-only", action="store_true",
                     help="非交互报告模式（不读 stdin refs，用 --range 指定；发现问题只警告，绝不阻断）")
     ap.add_argument("--range", dest="ranges", action="append", default=[],
-                    help="手工指定提交范围，可重复；空字符串=全部未推送")
+                    help="手工指定提交范围，可重复。特殊值 ALL = 全部未推送"
+                         "（比传空字符串可靠：空串在 PowerShell 里会被吞掉）")
     args = ap.parse_args(argv)
 
     if os.environ.get(SKIP_ENV):
@@ -238,8 +239,20 @@ def main(argv=None) -> int:
                             "--symbolic-full-name", "@{u}"], cwd=root, check=False)
         revranges = [f"{upstream}..HEAD"] if upstream else []
 
-    # 空范围字符串归一化为"全部未推送"
-    revranges = [r for r in revranges if r.strip()]
+    # 归一化：`ALL`（POSIX 下也可以直接传空串）→ 全部未推送。
+    # 为什么需要 ALL 这个哨兵：在 PowerShell 里 `--range ""` 的空串会被吞掉，
+    # argparse 直接报 "expected one argument"——不如给一个能明确传进来的值。
+    # 上游不存在时退回 `HEAD`（git log HEAD = 全部提交），得到的是"全量体检"。
+    normalized: list[str] = []
+    for r in revranges:
+        if r.strip().upper() == "ALL":
+            upstream = git_out(["rev-parse", "--abbrev-ref",
+                                "--symbolic-full-name", "@{u}"],
+                               cwd=root, check=False)
+            normalized.append(f"{upstream}..HEAD" if upstream else "HEAD")
+        elif r.strip():
+            normalized.append(r)
+    revranges = normalized
 
     red, yellow, ok = check(root, revranges)
 

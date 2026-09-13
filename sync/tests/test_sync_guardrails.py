@@ -701,6 +701,25 @@ def test_given_check_only_when_red_items_then_never_blocks():
     assert "仅为警告" in out or "检查通过" in out
 
 
+def test_given_all_range_sentinel_when_used_then_works_on_windows_shells():
+    """`--range ALL` 必须可用。
+
+    为什么需要这个哨兵：原先文档让人传空字符串表示"全部未推送"，但
+    PowerShell 会把 `--range ""` 的空串吞掉，argparse 直接报
+    "expected one argument"——用户照着文档敲会失败。给一个能明确传进来的
+    值，比要求用户懂各 shell 的空串差异更实在。
+    """
+    proc = subprocess.run(
+        [sys.executable, str(SYNC_DIR / "pre_push.py"), "--check-only",
+         "--range", "ALL"],
+        capture_output=True, cwd=str(REPO_ROOT))
+    assert proc.returncode == 0, (
+        "ALL 应当可用且永不阻断：\n"
+        + proc.stderr.decode("utf-8", "replace")[:500])
+    out = proc.stdout.decode("utf-8", "replace")
+    assert "expected one argument" not in out
+
+
 def test_given_hook_shell_wrapper_when_read_then_never_blocks_hard():
     """钩子薄壳里不应残留"无条件 exit 1"的写法。
 
