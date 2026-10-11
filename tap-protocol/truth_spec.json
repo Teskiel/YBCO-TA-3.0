@@ -1,0 +1,384 @@
+{
+ "schema": "tap/truth_spec@1",
+ "spec_version": "V1",
+ "spec_state": "APPROVED",
+ "approved_by": "user",
+ "approved_at": "2026-10-11T01:30:00+08:00",
+ "project": "ybco_measurement",
+ "roots": {
+  "project": ".",
+  "allow": [
+   "projects/ybco_measurement",
+   "validators",
+   "<REPO_ROOT>"
+  ]
+ },
+ "scope": {
+  "in": [
+   "G0 任务理解与规格冻结",
+   "G1 真值提取与来源核验",
+   "不需要硬件的离线自检（pytest / 同步守护 / dry-run 编排器）"
+  ],
+  "out": [
+   "任何需要连接仪器的动作（LakeShore 335 / PXI VNA / N7779C 激光 / E8257D / PXIe-4480）",
+   "对 YBCO-TA-3.0 仓库的任何修改（本试点只读它、只往协议仓写）",
+   "测量数据的有效性判定（无硬件则无从谈起）"
+  ]
+ },
+ "rules": [
+  {
+   "rule_id": "BASE-001",
+   "statement": "Auto_Sweep/tests 的实测基线是 12 failed / 632 passed / 1 skipped（27.8 s），失败集中在 test_auto_reconnect.py 与 test_stability_fallback.py；失败归因于本机缺 NI-VISA（visa32.dll），属环境缺失而非代码缺陷（待确认）。",
+   "class": "FACT",
+   "criticality": "NON_BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "agent-measurement（本机实测，2026-10-11）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/truth_evidence.md"
+   ],
+   "scope": "本机 <this-machine> 的 Auto_Sweep/tests",
+   "exceptions": [],
+   "verification": {
+    "method": "pytest 实测并与基线比对",
+    "validator": "FILE:validators/wrappers/lab_checks.py",
+    "assert": "失败文件落在基线集合内且失败数 <= 12、通过数 >= 632"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "BASE-002",
+   "statement": "sync/tests 实测 54 项（项目 CLAUDE.md 写的是 35 项），必须全过；它是多机协作的唯一自动化防线。",
+   "class": "FACT",
+   "criticality": "NON_BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "agent-measurement（本机实测）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/truth_evidence.md"
+   ],
+   "scope": "本机 YBCO-TA-3.0/sync/tests",
+   "exceptions": [],
+   "verification": {
+    "method": "pytest sync/tests",
+    "validator": "FILE:validators/wrappers/lab_checks.py",
+    "assert": "退出码 0 且通过数 >= 54"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "BASE-003",
+   "statement": "Noisesweep 的 dry-run 编排器（--dry-run scan 4.5）在不接仪器的情况下退出码为 0、约 1 秒完成；它只往 .gitignore 覆盖的 Noisesweep/data/ 下写文件。",
+   "class": "FACT",
+   "criticality": "NON_BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "agent-measurement（本机实测）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/truth_evidence.md"
+   ],
+   "scope": "本机 YBCO-TA-3.0/Noisesweep",
+   "exceptions": [],
+   "verification": {
+    "method": "跑 dry-run 编排器并检查退出码",
+    "validator": "FILE:validators/wrappers/lab_checks.py",
+    "assert": "退出码 == 0"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "DOC-001",
+   "statement": "项目 CLAUDE.md 里有两处与实测不符的过期断言：①『645 个测试里有 11 个必然失败…另有约 29 个因 from _backend import 失败』（实测 12 failed，且未复现那 29 个）；②『sync/tests（35 项）』（实测 54 项）。文档自己第 21-24 行正好警告过这类问题。",
+   "class": "FACT",
+   "criticality": "NON_BLOCKING",
+   "resolution_status": "OPEN",
+   "source": "agent-measurement（本机实测）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/truth_evidence.md"
+   ],
+   "scope": "YBCO-TA-3.0/CLAUDE.md 第 63-64、113-115 行",
+   "exceptions": [],
+   "verification": {
+    "method": "实测与文档逐条对照",
+    "validator": "FILE:validators/wrappers/lab_checks.py",
+    "assert": "文档数字与实测一致（修正后本规则可关闭）"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "INSTR-001",
+   "statement": "就绪 = VISA 资源可打开（pyvisa.ResourceManager(\"visa32.dll\") + open_resource(address)，并设 parity/stop_bits）。沿用现有实现，不改。",
+   "class": "CONFIRMED",
+   "criticality": "BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "user-confirmation（2026-10-11，见 evidence/instrument_confirmation.md）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/instrument_confirmation.md",
+    "FILE:projects/ybco_measurement/INSTRUMENTS-CONFIRM.md"
+   ],
+   "scope": "全部仪器相关流程",
+   "exceptions": [],
+   "verification": {
+    "method": "核验确认记录完整（不证明设备行为）",
+    "validator": "FILE:validators/wrappers/lab_instr_check.py",
+    "assert": "六条规则均 CONFIRMED/RESOLVED 且 source 指向用户确认"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "INSTR-002",
+   "statement": "执行条件采用黑名单制：温控（设定点/斜坡）、激光（功率）、射频（功率）、量程（DAQ/VNA）四类禁止自动发送，其余默认放行。",
+   "class": "CONFIRMED",
+   "criticality": "BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "user-confirmation（2026-10-11，见 evidence/instrument_confirmation.md）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/instrument_confirmation.md",
+    "FILE:projects/ybco_measurement/INSTRUMENTS-CONFIRM.md"
+   ],
+   "scope": "全部仪器相关流程",
+   "exceptions": [],
+   "verification": {
+    "method": "核验确认记录完整（不证明设备行为）",
+    "validator": "FILE:validators/wrappers/lab_instr_check.py",
+    "assert": "六条规则均 CONFIRMED/RESOLVED 且 source 指向用户确认"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "INSTR-003",
+   "statement": "完成 = 存在 fine_s21.h5/coarse_s21.h5 且 attrs[\"completed_points\"] 达到本次设定点数。",
+   "class": "CONFIRMED",
+   "criticality": "BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "user-confirmation（2026-10-11，见 evidence/instrument_confirmation.md）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/instrument_confirmation.md",
+    "FILE:projects/ybco_measurement/INSTRUMENTS-CONFIRM.md"
+   ],
+   "scope": "全部仪器相关流程",
+   "exceptions": [],
+   "verification": {
+    "method": "核验确认记录完整（不证明设备行为）",
+    "validator": "FILE:validators/wrappers/lab_instr_check.py",
+    "assert": "六条规则均 CONFIRMED/RESOLVED 且 source 指向用户确认"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "INSTR-004",
+   "statement": "沿用现有 auto-reconnect 策略（尝试计数、成功后重置、用户主动断开不重连；已被 test_auto_reconnect.py 覆盖）；上述四类安全仪器例外，不自动重连。",
+   "class": "CONFIRMED",
+   "criticality": "BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "user-confirmation（2026-10-11，见 evidence/instrument_confirmation.md）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/instrument_confirmation.md",
+    "FILE:projects/ybco_measurement/INSTRUMENTS-CONFIRM.md"
+   ],
+   "scope": "全部仪器相关流程",
+   "exceptions": [],
+   "verification": {
+    "method": "核验确认记录完整（不证明设备行为）",
+    "validator": "FILE:validators/wrappers/lab_instr_check.py",
+    "assert": "六条规则均 CONFIRMED/RESOLVED 且 source 指向用户确认"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "INSTR-005",
+   "statement": "允许自动恢复；温控/激光/功率/量程相关异常必须人工处理。",
+   "class": "CONFIRMED",
+   "criticality": "BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "user-confirmation（2026-10-11，见 evidence/instrument_confirmation.md）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/instrument_confirmation.md",
+    "FILE:projects/ybco_measurement/INSTRUMENTS-CONFIRM.md"
+   ],
+   "scope": "全部仪器相关流程",
+   "exceptions": [],
+   "verification": {
+    "method": "核验确认记录完整（不证明设备行为）",
+    "validator": "FILE:validators/wrappers/lab_instr_check.py",
+    "assert": "六条规则均 CONFIRMED/RESOLVED 且 source 指向用户确认"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "INSTR-006",
+   "statement": "原始数据落盘后立即计算摘要并记入来源链；链文件为 <数据根>/_provenance.jsonl，数据根跟随 YBCO_EXPERIMENT_DATA_DIR，不入库。",
+   "class": "CONFIRMED",
+   "criticality": "BLOCKING",
+   "resolution_status": "RESOLVED",
+   "source": "user-confirmation（2026-10-11，见 evidence/instrument_confirmation.md）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/instrument_confirmation.md",
+    "FILE:projects/ybco_measurement/INSTRUMENTS-CONFIRM.md"
+   ],
+   "scope": "全部仪器相关流程",
+   "exceptions": [],
+   "verification": {
+    "method": "核验确认记录完整（不证明设备行为）",
+    "validator": "FILE:validators/wrappers/lab_instr_check.py",
+    "assert": "六条规则均 CONFIRMED/RESOLVED 且 source 指向用户确认"
+   },
+   "version": "V1"
+  },
+  {
+   "rule_id": "RISK-001",
+   "statement": "第 1 项选定的就绪判据只能证明『VISA 资源可打开』，**不证明量程/工作模式/温度已处于正确状态**；第 3 项的 completed_points 由程序自行维护，与真实采集进度是否一致未经验证。两者都是已接受但未消除的残余风险。",
+   "class": "FACT",
+   "criticality": "NON_BLOCKING",
+   "resolution_status": "OPEN",
+   "source": "agent-review（对用户选择的后果分析）",
+   "evidence": [
+    "FILE:projects/ybco_measurement/evidence/instrument_confirmation.md"
+   ],
+   "scope": "INSTR-001 / INSTR-003",
+   "exceptions": [],
+   "verification": {
+    "method": "需要真实仪器环境才能消除",
+    "validator": "FILE:projects/ybco_measurement/evidence/truth_evidence.md",
+    "assert": "首次真机运行时逐项复核就绪判据与完成判据"
+   },
+   "version": "V1"
+  }
+ ],
+ "requirements": [
+  {
+   "req_id": "REQ-001",
+   "mandatory": true,
+   "derives_from": [
+    "BASE-001"
+   ],
+   "assert": "Auto_Sweep/tests：失败文件落在基线集合内，且 failed<=12、passed>=632",
+   "evidence_required": 1,
+   "stage": "G4",
+   "input_manifest": [
+    "FILE:validators/wrappers/lab_checks.py",
+    "FILE:validators/wrappers/cad_checks.py",
+    "FILE:<REPO_ROOT>\\VERSION",
+    "FILE:<REPO_ROOT>\\requirements.txt"
+   ],
+   "verifier": {
+    "kind": "exec",
+    "script": "FILE:validators/wrappers/lab_checks.py",
+    "cmd": [
+     "python",
+     "validators/wrappers/lab_checks.py",
+     "--check",
+     "pytest-baseline",
+     "--req",
+     "REQ-001",
+     "--project",
+     "projects/ybco_measurement"
+    ],
+    "expect_exit": 0,
+    "evidence": [
+     "FILE:projects/ybco_measurement/protocol/results/REQ-001.evidence.txt"
+    ]
+   }
+  },
+  {
+   "req_id": "REQ-002",
+   "mandatory": true,
+   "derives_from": [
+    "BASE-002"
+   ],
+   "assert": "sync/tests 退出码 0 且 passed>=54",
+   "evidence_required": 1,
+   "stage": "G4",
+   "input_manifest": [
+    "FILE:validators/wrappers/lab_checks.py",
+    "FILE:<REPO_ROOT>\\sync\\check.py",
+    "FILE:<REPO_ROOT>\\machines\\machines.json"
+   ],
+   "verifier": {
+    "kind": "exec",
+    "script": "FILE:validators/wrappers/lab_checks.py",
+    "cmd": [
+     "python",
+     "validators/wrappers/lab_checks.py",
+     "--check",
+     "sync-guard",
+     "--req",
+     "REQ-002",
+     "--project",
+     "projects/ybco_measurement"
+    ],
+    "expect_exit": 0,
+    "evidence": [
+     "FILE:projects/ybco_measurement/protocol/results/REQ-002.evidence.txt"
+    ]
+   }
+  },
+  {
+   "req_id": "REQ-003",
+   "mandatory": true,
+   "derives_from": [
+    "BASE-003"
+   ],
+   "assert": "dry-run 编排器退出码 0",
+   "evidence_required": 1,
+   "stage": "G4",
+   "input_manifest": [
+    "FILE:validators/wrappers/lab_checks.py",
+    "FILE:<REPO_ROOT>\\Noisesweep\\orchestrator_noisesweep.py",
+    "FILE:<REPO_ROOT>\\Noisesweep\\_dryrun_config.json"
+   ],
+   "verifier": {
+    "kind": "exec",
+    "script": "FILE:validators/wrappers/lab_checks.py",
+    "cmd": [
+     "python",
+     "validators/wrappers/lab_checks.py",
+     "--check",
+     "dryrun",
+     "--req",
+     "REQ-003",
+     "--project",
+     "projects/ybco_measurement"
+    ],
+    "expect_exit": 0,
+    "evidence": [
+     "FILE:projects/ybco_measurement/protocol/results/REQ-003.evidence.txt"
+    ]
+   }
+  },
+  {
+   "req_id": "REQ-004",
+   "mandatory": true,
+   "derives_from": [
+    "INSTR-001",
+    "INSTR-002",
+    "INSTR-003",
+    "INSTR-004",
+    "INSTR-005",
+    "INSTR-006"
+   ],
+   "assert": "仪器六项均已由用户确认，且六条规则在规格中为 CONFIRMED/RESOLVED、source 指向确认记录",
+   "evidence_required": 1,
+   "stage": "G1",
+   "input_manifest": [
+    "FILE:validators/wrappers/lab_instr_check.py",
+    "FILE:validators/wrappers/cad_checks.py",
+    "FILE:projects/ybco_measurement/protocol/truth_spec.json",
+    "FILE:projects/ybco_measurement/evidence/instrument_confirmation.md"
+   ],
+   "verifier": {
+    "kind": "exec",
+    "script": "FILE:validators/wrappers/lab_instr_check.py",
+    "cmd": [
+     "python",
+     "validators/wrappers/lab_instr_check.py",
+     "--req",
+     "REQ-004",
+     "--project",
+     "projects/ybco_measurement"
+    ],
+    "expect_exit": 0,
+    "evidence": [
+     "FILE:projects/ybco_measurement/protocol/results/REQ-004.evidence.txt"
+    ]
+   }
+  }
+ ]
+}
